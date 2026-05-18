@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Local config
+.env
+*.local
+
+# User-data: settings/history/error logs live in ~/.claude-quota-tray
+# but ignore here too in case anyone runs from cwd by accident.
+.claude-quota-tray/
+*.log
+*.db
+
+# Local Claude Code agent instructions — not for distribution
+CLAUDE.md
+
