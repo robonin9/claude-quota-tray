@@ -8,18 +8,12 @@
 
 > หลักการทำงานเดียวกับโปรเจกต์ [Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter) แต่แสดงผลผ่าน system tray แทน ESP32 hardware
 
-## รองรับ OS ไหนบ้าง
+## รองรับ OS
 
-| OS | สถานะ |
-|---|---|
-| **Windows 10 / 11** | ✅ พัฒนาและทดสอบบนนี้ |
-| **macOS** | ⚠️ มีโค้ดรองรับ (pystray) และ build script แต่ยังไม่ได้ทดสอบจริง — น่าจะทำงานได้แต่ฟีเจอร์บางอย่าง (toast, sound, theme detect) จะ degraded |
-| **Linux** | ⚠️ ขึ้นกับ desktop environment — GNOME/Wayland ส่วนใหญ่ไม่รองรับ system tray, KDE/XFCE น่าจะใช้งานได้ |
-
-ฟีเจอร์ที่เป็น Windows-only โดยตรง:
-- Toast notification ที่ระบุ source app name ("Claude Quota Tray" แทน "Python") — ใช้ `windows-toasts`
-- เสียงแจ้งเตือนผ่าน `winsound.MessageBeep`
-- Auto light/dark theme detection จาก Windows registry
+**Windows 10 / 11 เท่านั้น** — แอปใช้ Win32 API หลายส่วน:
+- Toast notification ที่ระบุชื่อแอป (`windows-toasts`)
+- เสียงแจ้งเตือน (`winsound.MessageBeep`)
+- Auto light/dark theme detection จาก registry
 - Setup / Run / Update / Uninstall `.bat` scripts
 - Startup folder shortcut auto-creation
 
