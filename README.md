@@ -3,7 +3,7 @@
 ไอคอน system tray สำหรับ **Windows** ที่แสดงปริมาณการใช้งาน Claude (5-hour limit และ Weekly limit) ที่เหลืออยู่ — แค่เหลือบดูมุมจอก็รู้
 
 <p align="center">
-  <img src="assets/hero.png" width="900" alt="Claude Quota Tray" />
+  <img src="assets/preview.png" width="900" alt="Claude Quota Tray" />
 </p>
 
 > หลักการทำงานเดียวกับโปรเจกต์ [Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter) แต่แสดงผลผ่าน system tray แทน ESP32 hardware
