@@ -8,6 +8,8 @@
 
 > หลักการทำงานเดียวกับโปรเจกต์ [Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter) แต่แสดงผลผ่าน system tray แทน ESP32 hardware
 
+**Fork นี้** ดัดแปลงจาก [kpcrmv4/claude-quota-tray](https://github.com/kpcrmv4/claude-quota-tray) — รายละเอียดการเปลี่ยนแปลงทั้งหมดอยู่ใน **[CHANGELOG.md](CHANGELOG.md)** (OAuth หลายแหล่ง, Claude Desktop, ความเสถียร tray บน Windows ฯลฯ)
+
 ## รองรับ OS
 
 **Windows 10 / 11 เท่านั้น** — แอปใช้ Win32 API หลายส่วน:
@@ -39,7 +41,7 @@
 ## ความต้องการของระบบ
 
 - Python 3.9 ขึ้นไป (เฉพาะตอน build จาก source — Setup script ติดตั้ง Python ให้เองได้ถ้ายังไม่มี)
-- ติดตั้ง [Claude Code](https://docs.claude.com/en/docs/claude-code) และ login อย่างน้อย 1 ครั้ง — แอปอ่าน OAuth token จากไฟล์ที่ Claude Code สร้าง
+- Sign in อย่างน้อยหนึ่งทาง: **[Claude Desktop](https://claude.ai/download)** หรือ **[Claude Code](https://docs.claude.com/en/docs/claude-code)** (`claude auth login`) — แอปค้นหา OAuth token อัตโนมัติ (หรือตั้ง `CLAUDE_CODE_OAUTH_TOKEN` / path ใน Account)
 
 ## วิธีใช้ (สำหรับ end user)
 
@@ -52,7 +54,7 @@
    - เช็คว่ามี Python หรือยัง
    - **ถ้าไม่มี → ขอ permission แล้วดาวน์โหลด + ติดตั้ง Python 3.13.x ให้เอง** (per-user, ไม่ต้อง admin)
    - สร้าง virtual environment ในโฟลเดอร์โปรเจกต์
-   - ติดตั้ง dependencies (httpx, pystray, Pillow, windows-toasts)
+   - ติดตั้ง dependencies (httpx, pystray, Pillow, pycryptodome, windows-toasts)
    - สร้าง Shortcut ใน Windows Startup folder อัตโนมัติ (รันตอนเปิดเครื่อง)
    - ถามว่าจะรันเลยตอนนี้ไหม
 
@@ -111,7 +113,7 @@ build.bat
 
 ## วิธีทำงานเบื้องหลัง
 
-1. แอปอ่าน OAuth token จาก `%USERPROFILE%\.claude\.credentials.json` (หรือ path ที่ user ตั้งใน Account)
+1. แอปค้นหา OAuth token ตามลำดับ (ดู `auth_discovery.py`): ตัวแปร env → Claude Desktop (`config.json`) → Windows Credential Manager → ไฟล์ credentials ของ Claude Code (`~/.claude/.credentials.json` ฯลฯ) หรือ path ที่ตั้งใน Account
 2. ทุก N วินาที (default 60) ยิง POST ไป `https://api.anthropic.com/v1/messages` ด้วย body 1 token ของ Haiku
 3. **ไม่สนใจ response body** — อ่านเฉพาะ response headers:
    - `anthropic-ratelimit-unified-5h-utilization` → 5-hour usage %
@@ -128,11 +130,14 @@ claude-quota-tray/
 ├── src/
 │   ├── main.py             ← entry point + tray loop + menu
 │   ├── api_client.py       ← ยิง API + parse headers
-│   ├── token_reader.py     ← อ่าน OAuth token cross-platform
+│   ├── auth_discovery.py   ← ลำดับการค้นหา OAuth (env / Desktop / cred files)
+│   ├── desktop_auth.py     ← ถอด token จาก Claude Desktop (v10 + DPAPI)
+│   ├── token_reader.py     ← helpers + `python token_reader.py --probe`
 │   ├── icon_renderer.py    ← วาดไอคอน % แบบ dynamic (auto-contrast text)
 │   ├── config.py           ← env-driven defaults
 │   ├── settings.py         ← persisted user settings (~/.claude-quota-tray/settings.json)
 │   ├── accounts.py         ← multi-account management
+│   ├── i18n.py             ← ภาษา en / th
 │   ├── history.py          ← SQLite snapshot store + burn-rate calc
 │   ├── theme.py            ← detect Windows light/dark
 │   ├── sound.py            ← winsound alert beep
@@ -153,7 +158,7 @@ claude-quota-tray/
 
 ## ที่อยู่ของข้อมูลในเครื่อง
 
-- **OAuth token (อ่านอย่างเดียว)**: `%USERPROFILE%\.claude\.credentials.json`
+- **OAuth token (อ่านอย่างเดียว)**: Claude Desktop (`%LOCALAPPDATA%\Packages\Claude_*\...\Claude\`) หรือ Claude Code (`%USERPROFILE%\.claude\.credentials.json`) — ไม่คัดลอกลง settings
 - **Settings + history**: `%USERPROFILE%\.claude-quota-tray\`
   - `settings.json` — accounts, thresholds, schedule, theme, poll interval
   - `history.db` — SQLite snapshot history (default ลบเองเมื่อเกิน 7 วัน)
@@ -190,4 +195,5 @@ MIT — ดู `LICENSE` สำหรับรายละเอียด
 
 ## Credits
 
-Inspired by [Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter) โดย Hermann Björgvin (ESP32 hardware version of the same concept)
+- Tray app upstream: [kpcrmv4/claude-quota-tray](https://github.com/kpcrmv4/claude-quota-tray)
+- Concept: [Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter) โดย Hermann Björgvin (ESP32 hardware version of the same idea)

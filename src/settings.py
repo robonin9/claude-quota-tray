@@ -60,6 +60,8 @@ def _migrate(data: Dict[str, Any]) -> Dict[str, Any]:
 
     if not data.get("accounts"):
         data["accounts"] = defaults["accounts"]
+    if not data.get("active_account_id") and data.get("accounts"):
+        data["active_account_id"] = data["accounts"][0]["id"]
     return data
 
 

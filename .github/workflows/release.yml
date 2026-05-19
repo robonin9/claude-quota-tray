@@ -58,7 +58,7 @@ jobs:
                 "Setup claude quota tray.bat" \
                 "Update claude quota tray.bat" \
                 "Uninstall claude quota tray.bat" \
-                requirements.txt README.md LICENSE \
+                requirements.txt README.md CHANGELOG.md LICENSE \
                 "$OUT/"
           zip -r "${OUT}.zip" "$OUT"
 

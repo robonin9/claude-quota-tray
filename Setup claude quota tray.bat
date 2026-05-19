@@ -108,7 +108,7 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-echo   Installed: httpx, pystray, Pillow, windows-toasts
+echo   Installed packages from requirements.txt ^(incl. pycryptodome on Windows^)
 echo.
 
 REM ==================================================================

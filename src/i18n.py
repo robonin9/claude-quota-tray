@@ -66,6 +66,11 @@ _T: dict[str, dict[str, str]] = {
         "toast.heads_up_title": "{app}: heads up",
         "toast.heads_up_body": "{label} limit at {pct}%",
         "toast.error_title": "{app} error",
+        "toast.setup_title": "{app} — Sign in required",
+        "toast.setup_body": (
+            "No login found. Sign in to Claude Desktop, or install Claude Code "
+            "and run 'claude auth login'. You can also set Account → Manage accounts."
+        ),
 
         # Menu
         "menu.show_status": "Show status",
@@ -117,7 +122,11 @@ _T: dict[str, dict[str, str]] = {
         # Accounts dialog
         "dialog.accounts_title": "Claude Quota — Accounts",
         "dialog.accounts_heading": "Configured accounts",
-        "dialog.accounts_desc": "Each account points to a Claude Code credentials file. “Default” auto-discovers ~/.claude/.credentials.json.",
+        "dialog.accounts_desc": (
+            "Each account points to a Claude Code credentials file. "
+            "“Default” auto-discovers credentials (Claude Desktop, Claude Code file, "
+            "Windows Credential Manager, or CLAUDE_CODE_OAUTH_TOKEN)."
+        ),
         "dialog.accounts_no_selection": "Select an account first.",
         "dialog.accounts_keep_one": "At least one account must remain.",
         "dialog.accounts_remove_confirm": "Remove “{name}”?",
@@ -204,6 +213,12 @@ _T: dict[str, dict[str, str]] = {
         "toast.heads_up_title": "{app}: แจ้งเตือน",
         "toast.heads_up_body": "{label} ใช้ไปแล้ว {pct}%",
         "toast.error_title": "{app} ผิดพลาด",
+        "toast.setup_title": "{app} — ต้องเข้าสู่ระบบก่อน",
+        "toast.setup_body": (
+            "ไม่พบการ login — กรุณาเข้าสู่ระบบใน Claude Desktop "
+            "หรือติดตั้ง Claude Code แล้วรัน 'claude auth login' "
+            "หรือตั้งค่า Account → จัดการบัญชี"
+        ),
 
         # Menu
         "menu.show_status": "ดูสถานะ",
@@ -255,7 +270,11 @@ _T: dict[str, dict[str, str]] = {
         # Accounts dialog
         "dialog.accounts_title": "Claude Quota — บัญชี",
         "dialog.accounts_heading": "บัญชีที่ตั้งค่าไว้",
-        "dialog.accounts_desc": "แต่ละบัญชีจะชี้ไปที่ไฟล์ credentials ของ Claude Code  “Default” จะค้นหา ~/.claude/.credentials.json อัตโนมัติ",
+        "dialog.accounts_desc": (
+            "แต่ละบัญชีชี้ไปที่ไฟล์ credentials ของ Claude Code "
+            "โหมด “Default” จะค้นหาอัตโนมัติ (Claude Desktop, ไฟล์ Claude Code, "
+            "Windows Credential Manager หรือ CLAUDE_CODE_OAUTH_TOKEN)"
+        ),
         "dialog.accounts_no_selection": "กรุณาเลือกบัญชีก่อน",
         "dialog.accounts_keep_one": "ต้องมีบัญชีอย่างน้อย 1 รายการ",
         "dialog.accounts_remove_confirm": "ลบ “{name}” ใช่หรือไม่?",

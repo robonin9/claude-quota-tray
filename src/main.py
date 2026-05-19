@@ -1,10 +1,10 @@
 """
 Claude Quota Tray — entry point.
 
-A small system-tray app for Windows (and macOS/Linux) that polls Claude's
-usage headers and displays the higher of session/weekly utilisation as a
-coloured badge in the tray. Hover the icon for full details, right-click
-for actions.
+Windows system-tray app that polls Claude usage headers and shows the
+5-hour limit as a coloured badge. OAuth is discovered from Claude Desktop,
+Claude Code, or env vars (see auth_discovery.py). Hover for details,
+right-click for actions.
 """
 
 import subprocess
@@ -56,6 +56,7 @@ class AppState:
         self.active_account: Optional[dict] = None
         self.plan: Optional[str] = None
         self.paused_by_schedule = False
+        self.setup_notice_shown = False
 
     @property
     def headline_pct(self) -> Optional[int]:
@@ -116,6 +117,18 @@ def _within_schedule() -> bool:
     return h >= start or h < end
 
 
+def _maybe_show_setup_notice(icon: pystray.Icon) -> None:
+    """One-time toast when Claude Code auth is missing."""
+    if state.setup_notice_shown or state.token:
+        return
+    state.setup_notice_shown = True
+    notifications.notify(
+        icon,
+        t("toast.setup_title", app=config.APP_NAME),
+        t("toast.setup_body"),
+    )
+
+
 def _load_active_token() -> None:
     """Resolve the active account, token, and plan info."""
     try:
@@ -151,6 +164,7 @@ def _poll_loop_inner(icon: pystray.Icon):
     _load_active_token()
     _refresh_icon(icon)
     if state.token_error and state.token is None:
+        _maybe_show_setup_notice(icon)
         # Without a token, sit idle but keep checking — user can configure
         # an account from the menu and we'll pick it up on next iteration.
         while not state.stop.is_set():
@@ -197,7 +211,14 @@ def _maybe_prune():
     history.prune(retention)
 
 
-def _refresh_icon(icon: pystray.Icon):
+def _refresh_icon(icon: pystray.Icon, *, update_menu: bool = False) -> None:
+    """Refresh tray visuals.
+
+    On Windows, icon.menu / update_menu() must not run from the poll thread —
+    that race crashes the Win32 message loop and the tray icon vanishes.
+    The poller only updates the badge image + tooltip; menu rebuilds happen
+    from menu callbacks (main/message thread) or when update_menu=True.
+    """
     try:
         icon.icon = render_icon(state.headline_pct, error=state.is_error,
                                 theme=_current_theme(),
@@ -205,16 +226,15 @@ def _refresh_icon(icon: pystray.Icon):
     except Exception:
         _log_action_error("_refresh_icon:icon")
     try:
-        # Win32 caps tooltip at 128 wide chars — _build_tooltip truncates,
-        # but extra defence here in case a future caller forgets.
         icon.title = _build_tooltip()[:_TOOLTIP_MAX]
     except Exception:
         _log_action_error("_refresh_icon:title")
-    try:
-        icon.menu = build_menu()
-        icon.update_menu()
-    except Exception:
-        _log_action_error("_refresh_icon:menu")
+    if update_menu:
+        try:
+            icon.menu = build_menu()
+            icon.update_menu()
+        except Exception:
+            _log_action_error("_refresh_icon:menu")
 
 
 # Win32 tray tooltip (NOTIFYICONDATAW.szTip) is capped at 128 wide chars
@@ -309,6 +329,7 @@ def _check_notifications(icon: pystray.Icon, snap: UsageSnapshot):
 
 def action_refresh(icon, item):
     state.force_refresh.set()
+    _refresh_icon(icon, update_menu=True)
 
 
 def _log_action_error(where: str) -> None:
@@ -418,7 +439,7 @@ def _on_settings_changed(icon: pystray.Icon):
         _load_active_token()
         state.force_refresh.set()
         try:
-            _refresh_icon(icon)
+            _refresh_icon(icon, update_menu=True)
         except Exception:
             pass
     return _cb
@@ -442,7 +463,7 @@ def _make_switch_account(account_id: str):
         state.fired_thresholds = {"session": set(), "weekly": set()}
         _load_active_token()
         state.force_refresh.set()
-        _refresh_icon(icon)
+        _refresh_icon(icon, update_menu=True)
     return _do
 
 
@@ -450,21 +471,21 @@ def _make_set_threshold_preset(preset: list[int]):
     def _do(icon, item):
         user_settings.update(thresholds=preset)
         state.fired_thresholds = {"session": set(), "weekly": set()}
-        _refresh_icon(icon)
+        _refresh_icon(icon, update_menu=True)
     return _do
 
 
 def _make_set_theme(value: str):
     def _do(icon, item):
         user_settings.update(theme=value)
-        _refresh_icon(icon)
+        _refresh_icon(icon, update_menu=True)
     return _do
 
 
 def _make_set_icon_style(value: str):
     def _do(icon, item):
         user_settings.update(icon_style=value)
-        _refresh_icon(icon)
+        _refresh_icon(icon, update_menu=True)
     return _do
 
 
@@ -472,7 +493,7 @@ def _make_set_interval(seconds: int):
     def _do(icon, item):
         user_settings.update(poll_interval_seconds=seconds)
         state.force_refresh.set()
-        _refresh_icon(icon)
+        _refresh_icon(icon, update_menu=True)
     return _do
 
 
@@ -531,7 +552,7 @@ def _make_set_language(code: str):
 def action_toggle_sound(icon, item):
     cur = bool(user_settings.get("sound_alerts", True))
     user_settings.update(sound_alerts=not cur)
-    _refresh_icon(icon)
+    _refresh_icon(icon, update_menu=True)
 
 
 def action_toggle_schedule(icon, item):
@@ -539,7 +560,7 @@ def action_toggle_schedule(icon, item):
     sched["enabled"] = not bool(sched.get("enabled"))
     user_settings.update(schedule=sched)
     state.force_refresh.set()
-    _refresh_icon(icon)
+    _refresh_icon(icon, update_menu=True)
 
 
 # --- Menu construction ----------------------------------------------------
@@ -779,6 +800,28 @@ def _menu_burn_text() -> str:
 
 # --- Entry point ----------------------------------------------------------
 
+def _acquire_single_instance() -> bool:
+    """Return False if another tray instance is already running (Windows)."""
+    if sys.platform != "win32":
+        return True
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        mutex = kernel32.CreateMutexW(None, True, "Local\\ClaudeQuotaTray_v1")
+        if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+            return False
+        return True
+    except Exception:
+        return True
+
+
+def _start_poller(icon: pystray.Icon) -> None:
+    """pystray setup hook — show icon and start the background poll thread."""
+    icon.visible = True
+    threading.Thread(target=poll_loop, args=(icon,), daemon=True).start()
+
+
 def _redirect_stderr_to_log() -> None:
     """When running under pythonw.exe there is no console; redirect stderr to
     a file so we can see unhandled tracebacks instead of the process
@@ -799,29 +842,49 @@ def _redirect_stderr_to_log() -> None:
 def main():
     _redirect_stderr_to_log()
 
+    if not _acquire_single_instance():
+        try:
+            import ctypes
+
+            ctypes.windll.user32.MessageBoxW(
+                0,
+                "Claude Quota Tray is already running.\n"
+                "Check the system tray (hidden icons area).",
+                config.APP_NAME,
+                0x40,
+            )
+        except Exception:
+            pass
+        return
+
     try:
         user_settings.load()
         notifications.init(config.APP_NAME)
 
-        icon = pystray.Icon(
-            config.APP_ID,
-            icon=render_icon(None, theme=_current_theme(),
-                             style=_current_icon_style()),
-            title=f"{config.APP_NAME}\nStarting…",
-            menu=build_menu(),
-        )
-
-        poller = threading.Thread(target=poll_loop, args=(icon,), daemon=True)
-        poller.start()
-
-        icon.run()
-        try:
-            sys.stderr.write(
-                f"=== icon.run() returned cleanly "
-                f"{time.strftime('%Y-%m-%d %H:%M:%S')} ===\n"
+        while not state.stop.is_set():
+            icon = pystray.Icon(
+                config.APP_ID,
+                icon=render_icon(None, theme=_current_theme(),
+                                 style=_current_icon_style()),
+                title=f"{config.APP_NAME}\nStarting…",
+                menu=build_menu(),
             )
-        except Exception:
-            pass
+
+            icon.run(setup=_start_poller)
+
+            if state.stop.is_set():
+                break
+
+            # pystray exited without Quit — usually a Win32/menu race; restart.
+            try:
+                sys.stderr.write(
+                    f"=== tray loop exited unexpectedly "
+                    f"{time.strftime('%Y-%m-%d %H:%M:%S')} — restarting in 3s ===\n"
+                )
+            except Exception:
+                pass
+            time.sleep(3)
+
     except Exception:
         try:
             sys.stderr.write(
