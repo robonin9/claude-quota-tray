@@ -2,6 +2,8 @@
 
 ไอคอน system tray สำหรับ **Windows** ที่แสดงปริมาณการใช้งาน Claude (5-hour limit และ Weekly limit) ที่เหลืออยู่ — แค่เหลือบดูมุมจอก็รู้
 
+📘 **คู่มือภาษาไทยฉบับเต็ม (วิธีใช้ + คำแนะนำการตั้งค่า):** [README.th.md](README.th.md)
+
 <p align="center">
   <img src="assets/preview.png" width="900" alt="Claude Quota Tray" />
 </p>
@@ -12,19 +14,19 @@
 
 ## รองรับ OS
 
-**Windows 10 / 11 เท่านั้น** — แอปใช้ Win32 API หลายส่วน:
-- Toast notification ที่ระบุชื่อแอป (`windows-toasts`)
-- เสียงแจ้งเตือน (`winsound.MessageBeep`)
-- Auto light/dark theme detection จาก registry
-- Setup / Run / Update / Uninstall `.bat` scripts
-- Startup folder shortcut auto-creation
+**Windows 10 / 11 (แนะนำ)** — ฟีเจอร์ครบ: toast (`windows-toasts`), desktop widget, Setup/Update `.bat`, startup shortcut
+
+**macOS 13+ (เบต้า)** — tray + poll + history จาก source (`scripts/setup_mac.sh`) หรือ `.app` unsigned จาก [Releases](../../releases) (อาจต้องคลิกขวา → Open ครั้งแรก) — ดู [docs/SIGNING.md](docs/SIGNING.md)
+
+การ sign `.exe` บน Windows (optional): [docs/SIGNING.md](docs/SIGNING.md) — ต้องมี OV/EV `.pfx` ของ maintainer
 
 ## คุณสมบัติ
 
 - 🔋 แสดง % การใช้งานบน tray icon (เปลี่ยนสีตามระดับ — เขียว/เหลือง/ส้ม/แดง พร้อมตัวอักษรปรับสีอัตโนมัติให้อ่านง่ายบนทุกพื้นหลัง)
 - 🖱️ คลิกซ้าย → popup เล็กพร้อมหลอด progress bar 2 หลอด (5-hour + Weekly) + burn rate / ETA
 - 🖱️ คลิกขวา → เมนูพร้อม Unicode progress bar `🟡 5h ███████░░░ 67%` อ่านได้จากเมนูเลย
-- 📈 หน้าต่าง history 24 ชั่วโมง — กราฟ trend + หลอดสรุปปัจจุบัน
+- 📈 หน้าต่าง history — กราฟ Session / Weekly แยกแผง, เลือก 24 ชม. หรือ 7 วัน, ส่งออก CSV
+- 📊 Desktop widget (Windows) — แถบ quota เล็กลอยบนจอ always-on-top
 - 🔥 Burn rate / ETA — บอกว่าใช้กี่ %/ชม. และจะเต็มในกี่ชั่วโมง
 - 👥 Multi-account — สลับเช็คหลาย Claude Code credentials ได้
 - 🔔 Custom thresholds + เสียงเตือน — กำหนดเองได้ เช่น 60/80/95%
@@ -66,8 +68,10 @@
 ### 🟡 วิธีที่ 2: ใช้ .exe สำเร็จรูป
 
 1. ดาวน์โหลด `ClaudeQuotaTray.exe` จากหน้า [Releases](../../releases/latest)
-2. ดับเบิ้ลคลิกเพื่อรัน
+2. ดับเบิ้ลคลิกเพื่อรัน — ไอคอนบน **taskbar** มาจาก `.exe` โดยตรง (ไม่ใช่ไอคอน Python)
 3. ถ้าจะให้รันอัตโนมัติ: กด `Win+R` → `shell:startup` → Enter → ลาก `.exe` มาวาง
+
+โหมด source: รัน `build.bat` แล้วรัน **Setup** อีกครั้ง — shortcut ใน Startup จะชี้ `dist\ClaudeQuotaTray.exe` แทน `pythonw.exe` (ถ้าไม่ build ไว้ taskbar ยังเป็นไอคอน Python ได้)
 
 > ⚠️ **Windows Defender อาจเตือน** เพราะ `.exe` build ด้วย PyInstaller มักโดน flag เป็น unknown publisher คลิก "More info" → "Run anyway"
 
@@ -90,11 +94,12 @@ python src/main.py
 
 ```bash
 .venv\Scripts\activate
-pip install pyinstaller
+pip install -r requirements-dev.txt
+python scripts/generate_app_icon.py   # สร้าง assets/app.ico (ถ้ายังไม่มี)
 build.bat
 ```
 
-ไฟล์ผลลัพธ์จะอยู่ที่ `dist/ClaudeQuotaTray.exe` (~30 MB)
+ไฟล์ผลลัพธ์จะอยู่ที่ `dist/ClaudeQuotaTray.exe` (~30 MB) พร้อมไอคอนจาก `assets/app.ico`
 
 วาง `.exe` ไว้โฟลเดอร์เดียวกับ `Setup` / `Update` / `Uninstall` `.bat` ได้ (ถ้ามี) เพื่อใช้เมนูติดตั้งจาก tray
 
@@ -168,6 +173,11 @@ claude-quota-tray/
 ├── Run claude quota tray.bat       ← manual launcher (silent)
 ├── Update claude quota tray.bat    ← refresh deps + restart app
 ├── Uninstall claude quota tray.bat ← removes startup shortcut + venv + (optional) user data
+├── assets/
+│   └── app.ico             ← Start menu / .exe icon (regenerate via scripts/generate_app_icon.py)
+├── scripts/
+│   ├── generate_app_icon.py
+│   └── setup_mac.sh
 ├── requirements.txt
 ├── build.bat / build.sh  ← PyInstaller build scripts
 └── .github/workflows/

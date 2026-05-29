@@ -21,6 +21,7 @@ from typing import Optional
 import pystray
 
 import app_paths
+import app_platform
 import config
 import notifications
 import settings as user_settings
@@ -32,8 +33,9 @@ import accounts
 import history_window
 import status_window
 import settings_dialogs
+import desktop_widget
 from i18n import LANGUAGES, set_language, t
-from bar_widget import color_emoji, unicode_bar
+from bar_widget import color_emoji, refresh_color_constants, unicode_bar
 from api_client import fetch_usage, format_reset, UsageSnapshot
 from icon_renderer import render_icon
 from token_reader import TokenError
@@ -69,20 +71,27 @@ class AppState:
         self.token_expires_at: Optional[float] = None  # epoch seconds; None = unknown
         self.auth_retry_after: float = 0.0             # epoch seconds; 0 = no retry pending
         self.auth_401_notified: bool = False            # suppress duplicate toasts
+        self.last_poll_at: float = 0.0
+        self.poll_fail_streak: int = 0
+        self.update_check_done: bool = False
 
     @property
     def headline_pct(self) -> Optional[int]:
-        """Number shown on the tray icon.
-
-        Always the 5-hour figure because it resets in hours and is the
-        most actionable. Weekly remains visible in tooltip, popup, menu,
-        and history window.
-        """
+        """Number shown on the tray icon (metric from settings)."""
         if not self.snapshot or not self.snapshot.has_data:
             return None
-        if self.snapshot.session_pct is not None:
-            return self.snapshot.session_pct
-        return self.snapshot.weekly_pct
+        s = self.snapshot.session_pct
+        w = self.snapshot.weekly_pct
+        metric = user_settings.get("tray_icon_metric", "session")
+        if metric == "weekly":
+            return w if w is not None else s
+        if metric == "max":
+            if s is None:
+                return w
+            if w is None:
+                return s
+            return max(s, w)
+        return s if s is not None else w
 
     @property
     def is_error(self) -> bool:
@@ -110,7 +119,14 @@ def _current_icon_style() -> str:
 
 def _thresholds() -> list[int]:
     val = user_settings.get("thresholds", config.NOTIFY_THRESHOLDS)
-    return sorted({int(t) for t in val if isinstance(t, (int, float))})
+    return sorted({int(x) for x in val if isinstance(x, (int, float))})
+
+
+def _thresholds_for(key: str) -> list[int]:
+    specific = user_settings.get(f"thresholds_{key}")
+    if specific:
+        return sorted({int(x) for x in specific if isinstance(x, (int, float))})
+    return _thresholds()
 
 
 def _within_schedule() -> bool:
@@ -235,7 +251,6 @@ def _poll_loop_inner(icon: pystray.Icon):
                     and snapshot.error
                     and "401" in snapshot.error
                 ):
-                    # Feature 3: schedule a backoff retry and notify once
                     if not state.auth_401_notified:
                         state.auth_401_notified = True
                         notifications.notify(
@@ -245,15 +260,29 @@ def _poll_loop_inner(icon: pystray.Icon):
                         )
                     if not state.auth_retry_after:
                         state.auth_retry_after = time.time() + 30.0
+                    state.poll_fail_streak = min(state.poll_fail_streak + 1, 8)
+                else:
+                    if snapshot.ok:
+                        state.poll_fail_streak = 0
+                        state.last_poll_at = time.time()
+                    elif snapshot.error:
+                        state.poll_fail_streak = min(state.poll_fail_streak + 1, 8)
                 state.snapshot = snapshot
                 acct_id = state.active_account["id"] if state.active_account else "unknown"
                 history.record(acct_id, snapshot)
                 state.burn = history.burn_rate(60, acct_id)
                 _check_notifications(icon, snapshot)
             _refresh_icon(icon)
+            if not state.update_check_done:
+                state.update_check_done = True
+                _maybe_notify_update(icon)
 
         _maybe_prune()
-        interval = int(user_settings.get("poll_interval_seconds", config.POLL_INTERVAL_SECONDS))
+        base = int(user_settings.get("poll_interval_seconds", config.POLL_INTERVAL_SECONDS))
+        if state.poll_fail_streak > 0:
+            interval = min(600, base * (2 ** min(state.poll_fail_streak, 4)))
+        else:
+            interval = base
         state.force_refresh.clear()
         state.force_refresh.wait(timeout=max(15, interval))
 
@@ -275,6 +304,7 @@ def _refresh_icon(icon: pystray.Icon, *, update_menu: bool = False) -> None:
     The poller only updates the badge image + tooltip; menu rebuilds happen
     from menu callbacks (main/message thread) or when update_menu=True.
     """
+    refresh_color_constants()
     try:
         icon.icon = render_icon(state.headline_pct, error=state.is_error,
                                 theme=_current_theme(),
@@ -285,6 +315,10 @@ def _refresh_icon(icon: pystray.Icon, *, update_menu: bool = False) -> None:
         icon.title = _build_tooltip()[:_TOOLTIP_MAX]
     except Exception:
         _log_action_error("_refresh_icon:title")
+    try:
+        desktop_widget.refresh(_current_data)
+    except Exception:
+        pass
     if update_menu:
         try:
             icon.menu = build_menu()
@@ -338,6 +372,15 @@ def _build_tooltip() -> str:
         )
 
     body = "\n".join(parts) if parts else t('status.no_headers')
+    if state.last_poll_at > 0:
+        ago = int(time.time() - state.last_poll_at)
+        if ago < 60:
+            ago_s = f"{ago}s"
+        elif ago < 3600:
+            ago_s = f"{ago // 60}m"
+        else:
+            ago_s = f"{ago // 3600}h"
+        body += "\n" + t("status.last_poll", ago=ago_s)
     return _truncate(f"{header}\n{body}")
 
 
@@ -357,8 +400,10 @@ def _eta_summary() -> Optional[str]:
 def _check_notifications(icon: pystray.Icon, snap: UsageSnapshot):
     if not snap.ok or not snap.has_data:
         return
+    snooze = float(user_settings.get("alert_snooze_until") or 0)
+    if snooze > time.time():
+        return
 
-    thresholds = _thresholds()
     play_sound = bool(user_settings.get("sound_alerts", True))
     pairs = [
         ("session", snap.session_pct, t('bar.session_short')),
@@ -367,6 +412,7 @@ def _check_notifications(icon: pystray.Icon, snap: UsageSnapshot):
     for key, pct, label in pairs:
         if pct is None:
             continue
+        thresholds = _thresholds_for(key)
         fired = state.fired_thresholds[key]
         fired.intersection_update({th for th in thresholds if pct >= th})
         for threshold in thresholds:
@@ -408,8 +454,17 @@ def action_show_status(icon, item):
                              state.token_error[:200])
         return
     name = state.active_account["name"] if state.active_account else config.APP_NAME
+
+    def _open_history():
+        if state.active_account:
+            history_window.show(
+                state.active_account["id"],
+                state.active_account["name"],
+                get_data=_current_data,
+            )
+
     try:
-        ok = status_window.show(name, get_data=_current_data)
+        ok = status_window.show(name, get_data=_current_data, on_open_history=_open_history)
     except Exception:
         _log_action_error("action_show_status:status_window")
         ok = False
@@ -448,39 +503,87 @@ def action_show_error(icon, item):
                              msg[:200])
 
 
+def action_open_error_log(icon, item):
+    log = Path.home() / ".claude-quota-tray" / "error.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    if not log.exists():
+        log.write_text("", encoding="utf-8")
+    try:
+        app_platform.open_path(log)
+    except Exception as e:
+        notifications.notify(icon, config.APP_NAME, str(e)[:180])
+
+
+def action_copy_status(icon, item):
+    text = _build_tooltip().replace("\n", " | ")
+    try:
+        import tkinter as tk
+        r = tk.Tk()
+        r.withdraw()
+        r.clipboard_clear()
+        r.clipboard_append(text)
+        r.update()
+        r.destroy()
+        notifications.notify(icon, config.APP_NAME, t("common.save"))
+    except Exception as e:
+        notifications.notify(icon, config.APP_NAME, str(e)[:120])
+
+
+def action_snooze_alerts(icon, item):
+    user_settings.update(alert_snooze_until=time.time() + 3600)
+    notifications.notify(icon, config.APP_NAME, t("menu.snooze_alerts"))
+
+
+def _sync_desktop_widget(icon: pystray.Icon) -> None:
+    dw = user_settings.get("desktop_widget") or {}
+    if dw.get("enabled") and desktop_widget.is_supported():
+        desktop_widget.show(_current_data, lambda: action_show_status(icon, None))
+    else:
+        desktop_widget.hide()
+
+
+def action_toggle_desktop_widget(icon, item):
+    dw = dict(user_settings.get("desktop_widget") or {})
+    dw["enabled"] = not bool(dw.get("enabled"))
+    user_settings.update(desktop_widget=dw)
+    _sync_desktop_widget(icon)
+    _refresh_icon(icon, update_menu=True)
+
+
+def action_toggle_notify_on_update(icon, item):
+    user_settings.update(notify_on_update=not bool(user_settings.get("notify_on_update", True)))
+    _refresh_icon(icon, update_menu=True)
+
+
+def _maybe_notify_update(icon: pystray.Icon) -> None:
+    if not bool(user_settings.get("notify_on_update", True)):
+        return
+
+    def work():
+        try:
+            result = updater.check_for_update(_update_repo_spec())
+            if result.error or not result.latest or not result.update_available:
+                return
+            notifications.notify(
+                icon,
+                config.APP_NAME,
+                t("toast.update_available", version=result.latest.version),
+            )
+        except Exception:
+            pass
+
+    threading.Thread(target=work, daemon=True).start()
+
+
 def action_quit(icon, item):
+    desktop_widget.hide()
     state.stop.set()
     state.force_refresh.set()
     icon.stop()
 
 
 def _try_open_claude_desktop() -> bool:
-    """Best-effort: launch Claude Desktop so it can refresh the OAuth token."""
-    if sys.platform != "win32":
-        return False
-    local = os.environ.get("LOCALAPPDATA", "")
-    candidates = []
-    if local:
-        candidates.append(Path(local) / "Programs" / "claude" / "Claude.exe")
-        candidates.append(Path(local) / "Programs" / "Claude" / "Claude.exe")
-    for exe in candidates:
-        if exe.is_file():
-            try:
-                subprocess.Popen(
-                    [str(exe)],
-                    close_fds=True,
-                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-                )
-                return True
-            except Exception:
-                pass
-    # MSIX: try via explorer shell — best-effort, may open Start instead
-    try:
-        subprocess.Popen(["explorer.exe", "shell:AppsFolder"], close_fds=True)
-        return True
-    except Exception:
-        pass
-    return False
+    return app_platform.open_claude_desktop()
 
 
 def action_reauth(icon, item):
@@ -525,10 +628,7 @@ def _update_repo_spec() -> str:
 
 
 def _launch_bat(path: Path) -> None:
-    if sys.platform == "win32":
-        os.startfile(path)  # type: ignore[attr-defined]
-    else:
-        subprocess.Popen(["xdg-open", str(path)])
+    app_platform.open_path(path)
 
 
 def action_check_update(icon, item):
@@ -564,11 +664,7 @@ def _spawn_apply_update_and_quit(icon: pystray.Icon) -> None:
     script = app_paths.update_runner_script()
     py = app_paths.venv_python()
     if py and script.is_file():
-        popen_kw: dict = {"cwd": root, "close_fds": True}
-        if sys.platform == "win32":
-            popen_kw["creationflags"] = (
-                subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-            )
+        popen_kw: dict = {"cwd": root, "close_fds": True, **app_platform.detached_popen_kwargs()}
         subprocess.Popen([str(py), str(script), "--apply"], **popen_kw)
         action_quit(icon, None)
         return
@@ -674,6 +770,7 @@ def _on_settings_changed(icon: pystray.Icon):
         state.fired_thresholds = {"session": set(), "weekly": set()}
         _load_active_token()
         state.force_refresh.set()
+        _sync_desktop_widget(icon)
         try:
             _refresh_icon(icon, update_menu=True)
         except Exception:
@@ -705,8 +802,19 @@ def _make_switch_account(account_id: str):
 
 def _make_set_threshold_preset(preset: list[int]):
     def _do(icon, item):
-        user_settings.update(thresholds=preset)
+        user_settings.update(
+            thresholds=preset,
+            thresholds_session=preset,
+            thresholds_weekly=preset,
+        )
         state.fired_thresholds = {"session": set(), "weekly": set()}
+        _refresh_icon(icon, update_menu=True)
+    return _do
+
+
+def _make_set_tray_metric(value: str):
+    def _do(icon, item):
+        user_settings.update(tray_icon_metric=value)
         _refresh_icon(icon, update_menu=True)
     return _do
 
@@ -714,6 +822,7 @@ def _make_set_threshold_preset(preset: list[int]):
 def _make_set_theme(value: str):
     def _do(icon, item):
         user_settings.update(theme=value)
+        refresh_color_constants()
         _refresh_icon(icon, update_menu=True)
     return _do
 
@@ -746,11 +855,7 @@ def _restart_app(icon) -> None:
             args = [sys.executable] + sys.argv[1:]
         else:
             args = [sys.executable] + sys.argv
-        kwargs: dict = {"close_fds": True}
-        if sys.platform == "win32":
-            DETACHED_PROCESS = 0x00000008
-            CREATE_NEW_PROCESS_GROUP = 0x00000200
-            kwargs["creationflags"] = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        kwargs: dict = {"close_fds": True, **app_platform.detached_popen_kwargs()}
         subprocess.Popen(args, **kwargs)
     except Exception:
         _log_action_error("restart_spawn")
@@ -830,11 +935,14 @@ def build_menu():
         pystray.MenuItem(t('menu.show_status'), action_show_status, default=True),
         pystray.MenuItem(t('menu.show_history'), action_show_history),
         pystray.MenuItem(t('menu.refresh_now'), action_refresh),
+        pystray.MenuItem(t('menu.copy_status'), action_copy_status),
+        pystray.MenuItem(t('menu.snooze_alerts'), action_snooze_alerts),
         pystray.MenuItem(
             t('menu.show_last_error'),
             action_show_error,
             visible=lambda item: state.is_error,
         ),
+        pystray.MenuItem(t('menu.open_error_log'), action_open_error_log),
         pystray.MenuItem(
             t('menu.reauth'),
             action_reauth,
@@ -983,6 +1091,23 @@ def _build_settings_menu():
     threshold_items.append(pystray.MenuItem(t('menu.thresholds_custom'),
                                             action_edit_thresholds))
 
+    cur_metric = user_settings.get("tray_icon_metric", "session")
+    metric_items = [
+        pystray.MenuItem(
+            label,
+            _make_set_tray_metric(value),
+            checked=lambda item, v=value: v == cur_metric,
+            radio=True,
+        )
+        for label, value in (
+            (t("menu.metric_session"), "session"),
+            (t("menu.metric_weekly"), "weekly"),
+            (t("menu.metric_max"), "max"),
+        )
+    ]
+
+    dw_enabled = bool((user_settings.get("desktop_widget") or {}).get("enabled"))
+
     return pystray.Menu(
         pystray.MenuItem(t('menu.alert_thresholds'),
                          pystray.Menu(*threshold_items)),
@@ -990,6 +1115,18 @@ def _build_settings_menu():
             t('menu.sound_alerts'),
             action_toggle_sound,
             checked=lambda item: bool(user_settings.get("sound_alerts", True)),
+        ),
+        pystray.MenuItem(
+            t("menu.notify_on_update"),
+            action_toggle_notify_on_update,
+            checked=lambda item: bool(user_settings.get("notify_on_update", True)),
+        ),
+        pystray.MenuItem(t("menu.tray_metric"), pystray.Menu(*metric_items)),
+        pystray.MenuItem(
+            t("menu.desktop_widget_enable"),
+            action_toggle_desktop_widget,
+            visible=lambda item: desktop_widget.is_supported(),
+            checked=lambda item: dw_enabled,
         ),
         pystray.MenuItem(
             sched_label,
@@ -1071,24 +1208,13 @@ def _menu_burn_text() -> str:
 # --- Entry point ----------------------------------------------------------
 
 def _acquire_single_instance() -> bool:
-    """Return False if another tray instance is already running (Windows)."""
-    if sys.platform != "win32":
-        return True
-    try:
-        import ctypes
-
-        kernel32 = ctypes.windll.kernel32
-        mutex = kernel32.CreateMutexW(None, True, "Local\\ClaudeQuotaTray_v1")
-        if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-            return False
-        return True
-    except Exception:
-        return True
+    return app_platform.acquire_single_instance()
 
 
 def _start_poller(icon: pystray.Icon) -> None:
     """pystray setup hook — show icon and start the background poll thread."""
     icon.visible = True
+    _sync_desktop_widget(icon)
     threading.Thread(target=poll_loop, args=(icon,), daemon=True).start()
 
 
@@ -1110,21 +1236,16 @@ def _redirect_stderr_to_log() -> None:
 
 
 def main():
+    if sys.platform == "win32":
+        try:
+            app_platform.set_app_identity(config.WIN_APP_USER_MODEL_ID)
+        except Exception:
+            pass
+
     _redirect_stderr_to_log()
 
     if not _acquire_single_instance():
-        try:
-            import ctypes
-
-            ctypes.windll.user32.MessageBoxW(
-                0,
-                "Claude Quota Tray is already running.\n"
-                "Check the system tray (hidden icons area).",
-                config.APP_NAME,
-                0x40,
-            )
-        except Exception:
-            pass
+        app_platform.already_running_message(config.APP_NAME)
         return
 
     try:

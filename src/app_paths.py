@@ -28,13 +28,13 @@ def main_script() -> Path:
 
 
 def venv_pythonw() -> Optional[Path]:
-    pyw = project_root() / ".venv" / "Scripts" / "pythonw.exe"
-    return pyw if pyw.is_file() else None
+    import app_platform as plat
+    return plat.venv_pythonw(project_root())
 
 
 def venv_python() -> Optional[Path]:
-    py = project_root() / ".venv" / "Scripts" / "python.exe"
-    return py if py.is_file() else None
+    import app_platform as plat
+    return plat.venv_python(project_root())
 
 
 def is_source_install() -> bool:

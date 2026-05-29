@@ -398,17 +398,23 @@ def open_thresholds(on_saved: Callable[[], None]) -> None:
 
 def _build_thresholds(root: tk.Tk, on_saved: Callable[[], None]) -> None:
     root.title(t('dialog.thresholds_title'))
-    root.geometry("420x260")
+    root.geometry("420x320")
 
-    cur = user_settings.get("thresholds", [80, 95])
+    cur_s = user_settings.get("thresholds_session") or user_settings.get("thresholds", [80, 95])
+    cur_w = user_settings.get("thresholds_weekly") or user_settings.get("thresholds", [80, 95])
 
     _label(root, t('dialog.thresholds_heading'),
            font=ui_font(12, "bold")).pack(anchor="w", padx=16, pady=(14, 4))
     _label(root, t('dialog.thresholds_desc'),
-           muted=True, font=ui_font(9)).pack(anchor="w", padx=16, pady=(0, 14))
+           muted=True, font=ui_font(9)).pack(anchor="w", padx=16, pady=(0, 10))
 
-    var = tk.StringVar(value=", ".join(str(v) for v in cur))
-    _entry(root, var).pack(fill="x", padx=16)
+    _label(root, t('bar.session_label'), font=ui_font(9, "bold")).pack(anchor="w", padx=16)
+    var_s = tk.StringVar(value=", ".join(str(v) for v in cur_s))
+    _entry(root, var_s).pack(fill="x", padx=16, pady=(2, 8))
+
+    _label(root, t('bar.weekly_label'), font=ui_font(9, "bold")).pack(anchor="w", padx=16)
+    var_w = tk.StringVar(value=", ".join(str(v) for v in cur_w))
+    _entry(root, var_w).pack(fill="x", padx=16)
 
     sound_var = tk.BooleanVar(value=bool(user_settings.get("sound_alerts", True)))
     tk.Checkbutton(
@@ -422,22 +428,29 @@ def _build_thresholds(root: tk.Tk, on_saved: Callable[[], None]) -> None:
     btn_row = tk.Frame(root, bg=_BG)
     btn_row.pack(fill="x", padx=16, pady=18, side="bottom")
 
-    def _do_save():
-        raw = var.get().replace(";", ",")
+    def _parse(raw: str) -> Optional[list[int]]:
         try:
             values = sorted({
                 max(1, min(100, int(part.strip())))
-                for part in raw.split(",") if part.strip()
+                for part in raw.replace(";", ",").split(",") if part.strip()
             })
+            return values if values else None
         except ValueError:
+            return None
+
+    def _do_save():
+        sess = _parse(var_s.get())
+        week = _parse(var_w.get())
+        if sess is None or week is None:
             messagebox.showwarning(t('dialog.thresholds_heading'),
                                    t('dialog.thresholds_invalid'))
             return
-        if not values:
-            messagebox.showwarning(t('dialog.thresholds_heading'),
-                                   t('dialog.thresholds_empty'))
-            return
-        user_settings.update(thresholds=values, sound_alerts=sound_var.get())
+        user_settings.update(
+            thresholds=sess,
+            thresholds_session=sess,
+            thresholds_weekly=week,
+            sound_alerts=sound_var.get(),
+        )
         on_saved()
         root.destroy()
 

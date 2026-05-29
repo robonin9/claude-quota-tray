@@ -25,6 +25,8 @@ MODEL = os.environ.get("CQT_MODEL", "claude-haiku-4-5")
 # Application identity (used by pystray and Windows for the tray entry).
 APP_NAME = "Claude Quota Tray"
 APP_ID = "ClaudeQuotaTray"
+# Windows taskbar / toast grouping (must match pinned shortcut when using .exe)
+WIN_APP_USER_MODEL_ID = "ClaudeQuotaTray.QuotaTray.1"
 APP_VERSION = "0.2.0"
 
 # GitHub Releases source for in-app / Update.bat upgrades (owner/repo or full URL).

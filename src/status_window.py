@@ -16,9 +16,10 @@ from typing import Callable, Optional
 
 from bar_widget import (
     BG, BTN_BG, BTN_BG_ACTIVE, MUTED, TEXT,
-    apply_bar, build_bar, format_burn, ui_font,
+    apply_bar, build_bar, format_burn, refresh_color_constants, ui_font,
 )
 from i18n import t
+from ui_theme import colors
 
 
 _window_lock = threading.Lock()
@@ -41,7 +42,8 @@ def _log_error(where: str) -> None:
         pass
 
 
-def show(account_name: str, get_data: SnapshotFetcher) -> bool:
+def show(account_name: str, get_data: SnapshotFetcher,
+         on_open_history: Optional[Callable[[], None]] = None) -> bool:
     """
     Open (or focus) the compact status popup.
     Returns True if the spawn succeeded (Tk initialised), False on failure
@@ -59,7 +61,7 @@ def show(account_name: str, get_data: SnapshotFetcher) -> bool:
     _spawn_result["ok"] = False
     ready = threading.Event()
     threading.Thread(
-        target=_run, args=(account_name, get_data, ready),
+        target=_run, args=(account_name, get_data, ready, on_open_history),
         daemon=True,
     ).start()
     # Give the worker a brief window to init Tk; if it failed quickly we
@@ -80,7 +82,8 @@ def _bring_to_front(win: tk.Tk) -> None:
 
 
 def _run(account_name: str, get_data: SnapshotFetcher,
-         ready: threading.Event) -> None:
+         ready: threading.Event,
+         on_open_history: Optional[Callable[[], None]] = None) -> None:
     global _open_window
     root: Optional[tk.Tk] = None
     try:
@@ -108,7 +111,7 @@ def _run(account_name: str, get_data: SnapshotFetcher,
         with _window_lock:
             _open_window = root
 
-        _build_widgets(root, account_name, get_data)
+        _build_widgets(root, account_name, get_data, on_open_history=on_open_history)
 
         _spawn_result["ok"] = True
         ready.set()
@@ -129,28 +132,32 @@ def _run(account_name: str, get_data: SnapshotFetcher,
 
 
 def _build_widgets(root: tk.Tk, account_name: str,
-                   get_data: SnapshotFetcher) -> None:
-    header = tk.Frame(root, bg=BG)
+                   get_data: SnapshotFetcher,
+                   on_open_history: Optional[Callable[[], None]] = None) -> None:
+    refresh_color_constants()
+    c = colors()
+    root.configure(bg=c["BG"])
+    header = tk.Frame(root, bg=c["BG"])
     header.pack(fill="x", padx=14, pady=(12, 0))
-    title_box = tk.Frame(header, bg=BG)
+    title_box = tk.Frame(header, bg=c["BG"])
     title_box.pack(side="left")
     tk.Label(
         title_box, text=account_name,
         font=ui_font(11, "bold"),
-        fg=TEXT, bg=BG,
+        fg=c["TEXT"], bg=c["BG"],
     ).pack(side="left")
     plan_lbl = tk.Label(
         title_box, text="", font=ui_font(9, "bold"),
-        fg="#a3b8ff", bg=BG,
+        fg=c["ACCENT"], bg=c["BG"],
     )
     plan_lbl.pack(side="left", padx=(8, 0))
     burn_lbl = tk.Label(
         header, text="", font=ui_font(9),
-        fg=MUTED, bg=BG, justify="right",
+        fg=c["MUTED"], bg=c["BG"], justify="right",
     )
     burn_lbl.pack(side="right")
 
-    panel = tk.Frame(root, bg=BG)
+    panel = tk.Frame(root, bg=c["BG"])
     panel.pack(fill="x", padx=14, pady=(8, 4))
 
     session_bar = build_bar(panel, t('bar.session_label'))
@@ -158,7 +165,7 @@ def _build_widgets(root: tk.Tk, account_name: str,
     weekly_bar = build_bar(panel, t('bar.weekly_label'))
     weekly_bar["frame"].pack(fill="x")
 
-    footer = tk.Frame(root, bg=BG)
+    footer = tk.Frame(root, bg=c["BG"])
     footer.pack(fill="x", padx=14, pady=(8, 12), side="bottom")
 
     def _refresh():
@@ -172,19 +179,18 @@ def _build_widgets(root: tk.Tk, account_name: str,
         plan = data.get("plan")
         plan_lbl.configure(text=("· " + plan) if plan else "")
 
-    tk.Button(
-        footer, text=t('common.close'), command=root.destroy,
-        bg=BTN_BG, fg=TEXT, relief="flat",
-        activebackground=BTN_BG_ACTIVE, activeforeground=TEXT,
-        padx=14, pady=4, cursor="hand2",
-    ).pack(side="right")
+    def _btn(text, cmd, side="right", padx=0):
+        tk.Button(
+            footer, text=text, command=cmd,
+            bg=c["BTN_BG"], fg=c["TEXT"], relief="flat",
+            activebackground=c["BTN_BG_ACTIVE"], activeforeground=c["TEXT"],
+            padx=14, pady=4, cursor="hand2",
+        ).pack(side=side, padx=padx)
 
-    tk.Button(
-        footer, text=t('common.refresh'), command=_refresh,
-        bg=BTN_BG, fg=TEXT, relief="flat",
-        activebackground=BTN_BG_ACTIVE, activeforeground=TEXT,
-        padx=14, pady=4, cursor="hand2",
-    ).pack(side="right", padx=(0, 8))
+    _btn(t("common.close"), root.destroy)
+    _btn(t("common.refresh"), _refresh, padx=(0, 8))
+    if on_open_history:
+        _btn(t("menu.open_history"), on_open_history, padx=(0, 8))
 
     root.after(50, _refresh)
 

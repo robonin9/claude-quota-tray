@@ -139,6 +139,21 @@ def _empty_rate() -> dict:
     return {"rate": None, "eta_seconds": None}
 
 
+def export_csv(path: str | Path, hours: float = 24,
+               account_id: Optional[str] = None) -> int:
+    """Write recent snapshots to CSV. Returns row count."""
+    rows = recent(hours, account_id)
+    p = Path(path)
+    with open(p, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["timestamp_iso", "unix_ts", "session_pct", "weekly_pct"])
+        for ts, session_pct, weekly_pct in rows:
+            from datetime import datetime
+            iso = datetime.fromtimestamp(ts).isoformat(sep=" ", timespec="seconds")
+            w.writerow([iso, ts, session_pct, weekly_pct])
+    return len(rows)
+
+
 def prune(retention_days: int) -> None:
     """Delete rows older than retention_days."""
     if retention_days <= 0:
