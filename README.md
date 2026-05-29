@@ -96,6 +96,23 @@ build.bat
 
 ไฟล์ผลลัพธ์จะอยู่ที่ `dist/ClaudeQuotaTray.exe` (~30 MB)
 
+วาง `.exe` ไว้โฟลเดอร์เดียวกับ `Setup` / `Update` / `Uninstall` `.bat` ได้ (ถ้ามี) เพื่อใช้เมนูติดตั้งจาก tray
+
+## อัปเดตจาก GitHub (ในแอป)
+
+คลิกขวา tray → **Install / update**:
+
+| รายการ | ทำอะไร |
+|--------|--------|
+| **Check for updates** | เทียบเวอร์ชันกับ GitHub Releases |
+| **Install latest release…** | ดาวน์โหลด zip source (หรือ `.exe`) แล้วอัปเดต — แอปปิดแล้วรีสตาร์ทเอง |
+| **Update source (GitHub repo)…** | ตั้ง repo เช่น `robonin9/claude-quota-tray` หรือ URL เต็ม |
+| **Run Setup / Update / Uninstall** | เปิด `.bat` ในโฟลเดอร์ติดตั้ง (โหมด source + `.venv`) |
+
+- ค่า repo เก็บใน `settings.json` คีย์ `update_github_repo` (ว่าง = ใช้ `config.DEFAULT_UPDATE_REPO`)
+- Release บน GitHub ควรมี asset **source `.zip`** (CI สร้างให้ตอน tag) หรือ **`ClaudeQuotaTray.exe`** สำหรับโหมด exe อย่างเดียว
+- ทดสอบจากเทอร์มินัล: `python src/update_runner.py --check`
+
 ## การตั้งค่า
 
 คลิกขวาที่ icon → **Settings**:
@@ -108,6 +125,7 @@ build.bat
 | **Icon theme** | Settings → Icon theme | Auto / Light / Dark |
 | **Poll interval** | Settings → Poll interval | 30s / 1m / 2m / 5m |
 | **Multiple accounts** | Account → Manage accounts… | Add/Rename/Remove credentials path |
+| **Update source** | Install / update → Update source… | GitHub `owner/repo` สำหรับดึง release |
 
 ค่าทั้งหมดเก็บที่ `~/.claude-quota-tray/settings.json`
 

@@ -13,6 +13,9 @@ Changes compared to upstream v0.2.0. Tray UI, polling, history, and notification
 
 ### Added
 
+- **GitHub auto-update** — tray menu **Install / update**: check releases, set `owner/repo`, download latest source zip or `.exe` (`src/updater.py`, `src/update_runner.py`).
+- **Maintenance menu** — run Setup / Update / Uninstall `.bat`, open install folder.
+- **`src/app_paths.py`** — detect source install vs frozen `.exe`.
 - **`src/auth_discovery.py`** — unified OAuth discovery with platform-aware provider order.
 - **`src/desktop_auth.py`** — read and decrypt Claude Desktop `oauth:tokenCache` (Chromium v10; DPAPI on Windows, Keychain on macOS).
 - **Multi-source auth** (first match wins on Windows):

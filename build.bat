@@ -17,6 +17,8 @@ pyinstaller ^
     --paths src ^
     --hidden-import auth_discovery ^
     --hidden-import desktop_auth ^
+    --hidden-import updater ^
+    --hidden-import app_paths ^
     --collect-submodules Crypto ^
     src\main.py
 

@@ -225,9 +225,8 @@ def _pick_cache_entry(cache: dict) -> dict:
         expires = entry.get("expiresAt")
         if isinstance(expires, (int, float)):
             if expires < now_ms:
-                score -= 500.0  # expired
-            else:
-                score += float(expires) / 1e15
+                continue  # skip expired entries entirely
+            score += float(expires) / 1e15
 
         if score > best_score:
             best_score = score

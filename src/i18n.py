@@ -106,7 +106,50 @@ _T: dict[str, dict[str, str]] = {
         "menu.open_console": "Open Anthropic Console",
         "menu.console_usage": "Usage dashboard",
         "menu.console_limits": "Rate limits",
+        "menu.maintenance": "Install / update",
+        "menu.check_update": "Check for updates",
+        "menu.apply_update": "Install latest release…",
+        "menu.update_source": "Update source (GitHub repo)…",
+        "menu.open_releases": "Open releases page",
+        "menu.run_setup": "Run Setup (first install)",
+        "menu.run_update_bat": "Run Update script",
+        "menu.run_uninstall": "Uninstall…",
+        "menu.open_install_folder": "Open install folder",
         "menu.quit": "Quit {app}",
+
+        # Auth / re-auth
+        "menu.reauth": "Re-authenticate (fix 401)…",
+        "toast.reauth_title": "{app} — Re-authenticating",
+        "toast.reauth_body": "Opening Claude Desktop… will retry in 15 s. If the icon stays red, click Refresh after signing in.",
+        "toast.reauth_ok": "Token refreshed successfully.",
+        "toast.reauth_failed": "Token still invalid. Open Claude Desktop, sign in, then click Refresh.",
+        "toast.auth_expired_title": "{app} — Session expired",
+        "toast.auth_expired_body": "Claude Desktop token expired. Will retry in 30 s. Or right-click → Re-authenticate.",
+        "toast.token_refreshing": "Token near expiry — refreshing…",
+
+        "toast.update_checking": "Checking GitHub for updates…",
+        "toast.update_error": "Update check failed: {msg}",
+        "toast.update_available": "Update available: v{version}",
+        "toast.update_up_to_date": "Up to date (v{version})",
+        "toast.update_applied": "Update: {msg}",
+
+        "dialog.update_source_title": "Claude Quota — Update source",
+        "dialog.update_source_heading": "GitHub repository",
+        "dialog.update_source_desc": (
+            "Releases are downloaded from this repo (owner/repo or full github.com URL). "
+            "Example: robonin9/claude-quota-tray"
+        ),
+        "dialog.update_source_invalid": "Enter owner/repo or a github.com URL.",
+        "dialog.apply_update_title": "Install update",
+        "dialog.apply_update_confirm": (
+            "Download the latest release from GitHub and update this install?\n\n"
+            "Repo: {repo}\n"
+            "The app will close and restart when finished."
+        ),
+        "dialog.uninstall_confirm": (
+            "Run the uninstall script?\n\n"
+            "This removes the startup shortcut and virtual environment."
+        ),
 
         # Window titles
         "window.history_title": "Claude Quota — {name}",
@@ -254,7 +297,50 @@ _T: dict[str, dict[str, str]] = {
         "menu.open_console": "เปิด Anthropic Console",
         "menu.console_usage": "Dashboard การใช้งาน",
         "menu.console_limits": "Rate limits",
+        "menu.maintenance": "ติดตั้ง / อัปเดต",
+        "menu.check_update": "ตรวจสอบอัปเดต",
+        "menu.apply_update": "ติดตั้งเวอร์ชันล่าสุด…",
+        "menu.update_source": "แหล่งอัปเดต (GitHub repo)…",
+        "menu.open_releases": "เปิดหน้า Releases",
+        "menu.run_setup": "รัน Setup (ติดตั้งครั้งแรก)",
+        "menu.run_update_bat": "รันสคริปต์ Update",
+        "menu.run_uninstall": "ถอนการติดตั้ง…",
+        "menu.open_install_folder": "เปิดโฟลเดอร์ติดตั้ง",
         "menu.quit": "ออกจาก {app}",
+
+        # Auth / re-auth
+        "menu.reauth": "ยืนยันตัวตนใหม่ (แก้ 401)…",
+        "toast.reauth_title": "{app} — กำลังยืนยันตัวตนใหม่",
+        "toast.reauth_body": "กำลังเปิด Claude Desktop… จะลองใหม่ใน 15 วิ ถ้าไอคอนยังแดงอยู่ให้ login แล้วคลิก Refresh",
+        "toast.reauth_ok": "รีเฟรช Token สำเร็จ",
+        "toast.reauth_failed": "Token ยังไม่ถูกต้อง — เปิด Claude Desktop แล้ว login จากนั้นกด Refresh",
+        "toast.auth_expired_title": "{app} — Session หมดอายุ",
+        "toast.auth_expired_body": "Token ของ Claude Desktop หมดอายุ จะลองใหม่ใน 30 วิ หรือคลิกขวา → ยืนยันตัวตนใหม่",
+        "toast.token_refreshing": "Token ใกล้หมดอายุ — กำลังรีเฟรช…",
+
+        "toast.update_checking": "กำลังตรวจสอบอัปเดตจาก GitHub…",
+        "toast.update_error": "ตรวจสอบอัปเดตไม่สำเร็จ: {msg}",
+        "toast.update_available": "มีเวอร์ชันใหม่: v{version}",
+        "toast.update_up_to_date": "เป็นเวอร์ชันล่าสุดแล้ว (v{version})",
+        "toast.update_applied": "อัปเดต: {msg}",
+
+        "dialog.update_source_title": "Claude Quota — แหล่งอัปเดต",
+        "dialog.update_source_heading": "GitHub repository",
+        "dialog.update_source_desc": (
+            "ดาวน์โหลด release จาก repo นี้ (รูปแบบ owner/repo หรือ URL github.com เต็ม) "
+            "เช่น robonin9/claude-quota-tray"
+        ),
+        "dialog.update_source_invalid": "กรุณาใส่ owner/repo หรือ URL github.com",
+        "dialog.apply_update_title": "ติดตั้งอัปเดต",
+        "dialog.apply_update_confirm": (
+            "ดาวน์โหลด release ล่าสุดจาก GitHub และอัปเดตการติดตั้งนี้?\n\n"
+            "Repo: {repo}\n"
+            "แอปจะปิดแล้วเริ่มใหม่เมื่อเสร็จ"
+        ),
+        "dialog.uninstall_confirm": (
+            "รันสคริปต์ถอนการติดตั้ง?\n\n"
+            "จะลบ shortcut ใน Startup และ virtual environment"
+        ),
 
         # Window titles
         "window.history_title": "Claude Quota — {name}",

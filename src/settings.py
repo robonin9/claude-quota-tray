@@ -45,6 +45,8 @@ def _defaults() -> Dict[str, Any]:
         "poll_interval_seconds": 60,
         "history_retention_days": 7,
         "language": None,  # None → auto-detect from locale on first read
+        # GitHub owner/repo (or URL) for release checks and source/.exe updates
+        "update_github_repo": None,  # None → config.DEFAULT_UPDATE_REPO
     }
 
 

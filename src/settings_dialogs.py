@@ -445,3 +445,81 @@ def _build_thresholds(root: tk.Tk, on_saved: Callable[[], None]) -> None:
                    primary=True).pack(side="right")
     _styled_button(btn_row, t('common.cancel'), root.destroy).pack(
         side="right", padx=(0, 8))
+
+
+def open_update_source(on_saved: Optional[Callable[[], None]] = None) -> None:
+    def _build(root: tk.Tk) -> None:
+        import config
+
+        cur = user_settings.get("update_github_repo") or config.DEFAULT_UPDATE_REPO
+
+        root.title(t('dialog.update_source_title'))
+        root.geometry("480x220")
+
+        _label(root, t('dialog.update_source_heading'),
+               font=ui_font(12, "bold")).pack(anchor="w", padx=16, pady=(14, 4))
+        _label(root, t('dialog.update_source_desc'),
+               muted=True, font=ui_font(9)).pack(anchor="w", padx=16, pady=(0, 12))
+
+        var = tk.StringVar(value=str(cur))
+        _entry(root, var).pack(fill="x", padx=16)
+
+        btn_row = tk.Frame(root, bg=_BG)
+        btn_row.pack(fill="x", padx=16, pady=18, side="bottom")
+
+        def _do_save():
+            from updater import parse_github_repo
+
+            raw = var.get().strip()
+            try:
+                parse_github_repo(raw)
+            except ValueError:
+                messagebox.showwarning(
+                    t('dialog.update_source_heading'),
+                    t('dialog.update_source_invalid'),
+                )
+                return
+            user_settings.update(update_github_repo=raw)
+            if on_saved:
+                on_saved()
+            root.destroy()
+
+        _styled_button(btn_row, t('common.save'), _do_save,
+                       primary=True).pack(side="right")
+        _styled_button(btn_row, t('common.cancel'), root.destroy).pack(
+            side="right", padx=(0, 8))
+
+    _spawn("update_source", _build)
+
+
+def confirm_apply_update(on_confirm: Callable[[], None]) -> None:
+    def _build(root: tk.Tk) -> None:
+        import config
+
+        repo = user_settings.get("update_github_repo") or config.DEFAULT_UPDATE_REPO
+        root.withdraw()
+        ok = messagebox.askyesno(
+            t('dialog.apply_update_title'),
+            t('dialog.apply_update_confirm', repo=repo),
+            parent=root,
+        )
+        root.destroy()
+        if ok:
+            on_confirm()
+
+    _spawn("apply_update_confirm", _build)
+
+
+def confirm_uninstall(on_confirm: Callable[[], None]) -> None:
+    def _build(root: tk.Tk) -> None:
+        root.withdraw()
+        ok = messagebox.askyesno(
+            t('menu.run_uninstall'),
+            t('dialog.uninstall_confirm'),
+            parent=root,
+        )
+        root.destroy()
+        if ok:
+            on_confirm()
+
+    _spawn("uninstall_confirm", _build)

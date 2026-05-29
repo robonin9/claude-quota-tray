@@ -26,3 +26,8 @@ MODEL = os.environ.get("CQT_MODEL", "claude-haiku-4-5")
 APP_NAME = "Claude Quota Tray"
 APP_ID = "ClaudeQuotaTray"
 APP_VERSION = "0.2.0"
+
+# GitHub Releases source for in-app / Update.bat upgrades (owner/repo or full URL).
+DEFAULT_UPDATE_REPO = os.environ.get(
+    "CQT_UPDATE_REPO", "robonin9/claude-quota-tray"
+)

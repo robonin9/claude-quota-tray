@@ -7,6 +7,7 @@ Claude Code, or env vars (see auth_discovery.py). Hover for details,
 right-click for actions.
 """
 
+import os
 import subprocess
 import sys
 import threading
@@ -19,9 +20,11 @@ from typing import Optional
 
 import pystray
 
+import app_paths
 import config
 import notifications
 import settings as user_settings
+import updater
 import history
 import sound
 import theme as theme_mod
@@ -36,7 +39,13 @@ from icon_renderer import render_icon
 from token_reader import TokenError
 
 
-REPO_URL = "https://github.com/kpcrmv4/claude-quota-tray"
+def _repo_url() -> str:
+    spec = user_settings.get("update_github_repo") or config.DEFAULT_UPDATE_REPO
+    try:
+        owner, repo = updater.parse_github_repo(str(spec))
+        return f"https://github.com/{owner}/{repo}"
+    except ValueError:
+        return f"https://github.com/{config.DEFAULT_UPDATE_REPO}"
 CONSOLE_USAGE_URL = "https://console.anthropic.com/settings/usage"
 CONSOLE_LIMITS_URL = "https://console.anthropic.com/settings/limits"
 
@@ -57,6 +66,9 @@ class AppState:
         self.plan: Optional[str] = None
         self.paused_by_schedule = False
         self.setup_notice_shown = False
+        self.token_expires_at: Optional[float] = None  # epoch seconds; None = unknown
+        self.auth_retry_after: float = 0.0             # epoch seconds; 0 = no retry pending
+        self.auth_401_notified: bool = False            # suppress duplicate toasts
 
     @property
     def headline_pct(self) -> Optional[int]:
@@ -129,6 +141,9 @@ def _maybe_show_setup_notice(icon: pystray.Icon) -> None:
     )
 
 
+_TOKEN_REFRESH_AHEAD_SECS = 300  # reload token 5 min before it expires
+
+
 def _load_active_token() -> None:
     """Resolve the active account, token, and plan info."""
     try:
@@ -138,11 +153,22 @@ def _load_active_token() -> None:
         state.token = creds["token"]
         state.plan = creds.get("plan")
         state.token_error = None
+        state.auth_retry_after = 0.0
+        state.auth_401_notified = False
+        # Extract expiry for proactive refresh (feature 4)
+        raw = creds.get("raw") or {}
+        expires_ms = raw.get("expiresAt")
+        state.token_expires_at = (
+            float(expires_ms) / 1000.0
+            if isinstance(expires_ms, (int, float))
+            else None
+        )
     except TokenError as e:
         state.active_account = None
         state.token = None
         state.plan = None
         state.token_error = str(e)
+        state.token_expires_at = None
 
 
 # --- Background poller ----------------------------------------------------
@@ -185,10 +211,40 @@ def _poll_loop_inner(icon: pystray.Icon):
             _refresh_icon(icon)
         else:
             state.paused_by_schedule = False
+
+            # Feature 4: proactive refresh when token is near expiry
+            if (
+                state.token is not None
+                and state.token_expires_at is not None
+                and state.token_expires_at - time.time() < _TOKEN_REFRESH_AHEAD_SECS
+            ):
+                _load_active_token()
+
+            # Feature 3: backoff retry — reload token once the wait has elapsed
+            if state.auth_retry_after and time.time() >= state.auth_retry_after:
+                state.auth_retry_after = 0.0
+                _load_active_token()
+
             if state.token is None:
                 _load_active_token()
+
             if state.token:
                 snapshot = fetch_usage(state.token, model=config.MODEL)
+                if (
+                    not snapshot.ok
+                    and snapshot.error
+                    and "401" in snapshot.error
+                ):
+                    # Feature 3: schedule a backoff retry and notify once
+                    if not state.auth_401_notified:
+                        state.auth_401_notified = True
+                        notifications.notify(
+                            icon,
+                            t('toast.auth_expired_title', app=config.APP_NAME),
+                            t('toast.auth_expired_body'),
+                        )
+                    if not state.auth_retry_after:
+                        state.auth_retry_after = time.time() + 30.0
                 state.snapshot = snapshot
                 acct_id = state.active_account["id"] if state.active_account else "unknown"
                 history.record(acct_id, snapshot)
@@ -398,8 +454,188 @@ def action_quit(icon, item):
     icon.stop()
 
 
+def _try_open_claude_desktop() -> bool:
+    """Best-effort: launch Claude Desktop so it can refresh the OAuth token."""
+    if sys.platform != "win32":
+        return False
+    local = os.environ.get("LOCALAPPDATA", "")
+    candidates = []
+    if local:
+        candidates.append(Path(local) / "Programs" / "claude" / "Claude.exe")
+        candidates.append(Path(local) / "Programs" / "Claude" / "Claude.exe")
+    for exe in candidates:
+        if exe.is_file():
+            try:
+                subprocess.Popen(
+                    [str(exe)],
+                    close_fds=True,
+                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                )
+                return True
+            except Exception:
+                pass
+    # MSIX: try via explorer shell — best-effort, may open Start instead
+    try:
+        subprocess.Popen(["explorer.exe", "shell:AppsFolder"], close_fds=True)
+        return True
+    except Exception:
+        pass
+    return False
+
+
+def action_reauth(icon, item):
+    """Re-authenticate: reload token immediately; open Claude Desktop if needed."""
+    state.auth_retry_after = 0.0
+    state.auth_401_notified = False
+    _load_active_token()
+    if state.token:
+        notifications.notify(icon, config.APP_NAME, t('toast.reauth_ok'))
+        state.force_refresh.set()
+        return
+    # Token still missing — open Claude Desktop and retry after 15 s
+    _try_open_claude_desktop()
+    notifications.notify(
+        icon,
+        t('toast.reauth_title', app=config.APP_NAME),
+        t('toast.reauth_body'),
+    )
+    def _delayed_retry():
+        state.stop.wait(15)
+        if state.stop.is_set():
+            return
+        _load_active_token()
+        if state.token:
+            notifications.notify(icon, config.APP_NAME, t('toast.reauth_ok'))
+        else:
+            notifications.notify(
+                icon,
+                t('toast.error_title', app=config.APP_NAME),
+                t('toast.reauth_failed'),
+            )
+        state.force_refresh.set()
+    threading.Thread(target=_delayed_retry, daemon=True).start()
+
+
 def action_open_repo(icon, item):
-    webbrowser.open(REPO_URL)
+    webbrowser.open(_repo_url())
+
+
+def _update_repo_spec() -> str:
+    return str(user_settings.get("update_github_repo") or config.DEFAULT_UPDATE_REPO)
+
+
+def _launch_bat(path: Path) -> None:
+    if sys.platform == "win32":
+        os.startfile(path)  # type: ignore[attr-defined]
+    else:
+        subprocess.Popen(["xdg-open", str(path)])
+
+
+def action_check_update(icon, item):
+    notifications.notify(icon, config.APP_NAME, t("toast.update_checking"))
+
+    def work():
+        result = updater.check_for_update(_update_repo_spec())
+        if result.error:
+            notifications.notify(
+                icon,
+                config.APP_NAME,
+                t("toast.update_error", msg=result.error[:180]),
+            )
+            return
+        if result.latest and result.update_available:
+            notifications.notify(
+                icon,
+                config.APP_NAME,
+                t("toast.update_available", version=result.latest.version),
+            )
+        elif result.latest:
+            notifications.notify(
+                icon,
+                config.APP_NAME,
+                t("toast.update_up_to_date", version=result.latest.version),
+            )
+
+    threading.Thread(target=work, daemon=True).start()
+
+
+def _spawn_apply_update_and_quit(icon: pystray.Icon) -> None:
+    root = app_paths.project_root()
+    script = app_paths.update_runner_script()
+    py = app_paths.venv_python()
+    if py and script.is_file():
+        popen_kw: dict = {"cwd": root, "close_fds": True}
+        if sys.platform == "win32":
+            popen_kw["creationflags"] = (
+                subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+            )
+        subprocess.Popen([str(py), str(script), "--apply"], **popen_kw)
+        action_quit(icon, None)
+        return
+
+    def work():
+        try:
+            msg = updater.apply_update(
+                root,
+                _update_repo_spec(),
+                prefer_exe=app_paths.is_frozen() and not app_paths.is_source_install(),
+            )
+            notifications.notify(
+                icon, config.APP_NAME, t("toast.update_applied", msg=msg[:200])
+            )
+            if "after you quit" in msg.lower():
+                action_quit(icon, None)
+        except Exception as e:
+            notifications.notify(
+                icon, config.APP_NAME, t("toast.update_error", msg=str(e)[:180])
+            )
+
+    threading.Thread(target=work, daemon=True).start()
+
+
+def action_apply_update(icon, item):
+    settings_dialogs.confirm_apply_update(
+        lambda: _spawn_apply_update_and_quit(icon)
+    )
+
+
+def action_configure_update_source(icon, item):
+    settings_dialogs.open_update_source(_on_settings_changed(icon))
+
+
+def action_open_releases(icon, item):
+    result = updater.check_for_update(_update_repo_spec())
+    url = result.latest.html_url if result.latest else _repo_url() + "/releases"
+    webbrowser.open(url)
+
+
+def action_open_install_folder(icon, item):
+    _launch_bat(app_paths.project_root())
+
+
+def action_run_setup(icon, item):
+    path = app_paths.maintenance_scripts().get("setup")
+    if path:
+        _launch_bat(path)
+    else:
+        notifications.notify(icon, config.APP_NAME, t("toast.update_error", msg="Setup.bat not found"))
+
+
+def action_run_update_bat(icon, item):
+    path = app_paths.maintenance_scripts().get("update")
+    if path:
+        _launch_bat(path)
+    else:
+        action_apply_update(icon, item)
+
+
+def action_run_uninstall(icon, item):
+    path = app_paths.maintenance_scripts().get("uninstall")
+    if not path:
+        notifications.notify(icon, config.APP_NAME, t("toast.update_error", msg="Uninstall.bat not found"))
+        return
+
+    settings_dialogs.confirm_uninstall(lambda: _launch_bat(path))
 
 
 def action_open_console_usage(icon, item):
@@ -599,9 +835,15 @@ def build_menu():
             action_show_error,
             visible=lambda item: state.is_error,
         ),
+        pystray.MenuItem(
+            t('menu.reauth'),
+            action_reauth,
+            visible=lambda item: state.is_error or state.token_error is not None,
+        ),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(t('menu.account'), _build_account_menu()),
         pystray.MenuItem(t('menu.settings'), _build_settings_menu()),
+        pystray.MenuItem(t('menu.maintenance'), _build_maintenance_menu()),
         pystray.MenuItem(t('menu.open_console'), _build_console_menu()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Powered by KPWebappStudio", action_open_repo),
@@ -623,6 +865,34 @@ def _build_account_menu():
     if items:
         items.append(pystray.Menu.SEPARATOR)
     items.append(pystray.MenuItem(t('menu.manage_accounts'), action_manage_accounts))
+    return pystray.Menu(*items)
+
+
+def _build_maintenance_menu():
+    scripts = app_paths.maintenance_scripts()
+    items = [
+        pystray.MenuItem(t("menu.check_update"), action_check_update),
+        pystray.MenuItem(t("menu.apply_update"), action_apply_update),
+        pystray.MenuItem(t("menu.update_source"), action_configure_update_source),
+        pystray.MenuItem(t("menu.open_releases"), action_open_releases),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem(
+            t("menu.run_setup"),
+            action_run_setup,
+            visible=lambda item: scripts.get("setup") is not None,
+        ),
+        pystray.MenuItem(
+            t("menu.run_update_bat"),
+            action_run_update_bat,
+            visible=lambda item: scripts.get("update") is not None,
+        ),
+        pystray.MenuItem(
+            t("menu.run_uninstall"),
+            action_run_uninstall,
+            visible=lambda item: scripts.get("uninstall") is not None,
+        ),
+        pystray.MenuItem(t("menu.open_install_folder"), action_open_install_folder),
+    ]
     return pystray.Menu(*items)
 
 
