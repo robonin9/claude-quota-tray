@@ -25,4 +25,4 @@ MODEL = os.environ.get("CQT_MODEL", "claude-haiku-4-5")
 # Application identity (used by pystray and Windows for the tray entry).
 APP_NAME = "Claude Quota Tray"
 APP_ID = "ClaudeQuotaTray"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
