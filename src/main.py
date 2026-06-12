@@ -175,6 +175,25 @@ def _poll_loop_inner(icon: pystray.Icon):
                 _load_active_token()
             if state.token:
                 snapshot = fetch_usage(state.token, model=config.MODEL)
+                if not snapshot.ok and snapshot.status_code == 401:
+                    # The OAuth access token likely rotated on disk (Claude
+                    # Code refreshes it periodically). Re-read credentials and
+                    # retry once before surfacing the error.
+                    stale = state.token
+                    _load_active_token()
+                    if state.token and not state.token_error:
+                        rotated = state.token != stale
+                        snapshot = fetch_usage(state.token, model=config.MODEL)
+                        _log_info(
+                            "401 -> re-read token "
+                            f"({'rotated' if rotated else 'unchanged'}), "
+                            f"retried -> {'ok' if snapshot.ok else 'still failing'}"
+                        )
+                    else:
+                        _log_info(
+                            "401 -> re-read token failed: "
+                            f"{state.token_error or 'no token'}"
+                        )
                 state.snapshot = snapshot
                 acct_id = state.active_account["id"] if state.active_account else "unknown"
                 history.record(acct_id, snapshot)
@@ -322,6 +341,20 @@ def _log_action_error(where: str) -> None:
         pass
 
 
+def _log_info(message: str) -> None:
+    """Append a single timestamped info line to the shared log file.
+
+    Used for noteworthy-but-not-fatal events (e.g. an OAuth token rotation
+    that we recovered from) so they can be confirmed after the fact."""
+    try:
+        log = Path.home() / ".claude-quota-tray" / "error.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with open(log, "a", encoding="utf-8") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
+    except Exception:
+        pass
+
+
 def action_show_status(icon, item):
     """Left-click action: open the compact status popup with progress bars.
     Falls back to the full history window if the popup fails to spawn."""
@@ -375,6 +408,17 @@ def action_quit(icon, item):
     state.stop.set()
     state.force_refresh.set()
     icon.stop()
+
+
+def action_restart(icon, item):
+    """Right-click menu: relaunch the app (picks up a fresh token + new code).
+
+    Runs on a worker thread because _restart_app sleeps briefly and then tears
+    down pystray, which must not block this menu callback / message loop.
+    """
+    threading.Thread(
+        target=_restart_app, args=(icon,), daemon=True,
+    ).start()
 
 
 def action_open_repo(icon, item):
@@ -573,6 +617,7 @@ def build_menu():
         pystray.MenuItem(t('menu.show_status'), action_show_status, default=True),
         pystray.MenuItem(t('menu.show_history'), action_show_history),
         pystray.MenuItem(t('menu.refresh_now'), action_refresh),
+        pystray.MenuItem(t('menu.restart'), action_restart),
         pystray.MenuItem(
             t('menu.show_last_error'),
             action_show_error,
