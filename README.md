@@ -31,6 +31,8 @@
 - 💾 History storage — เก็บ snapshot ใน SQLite (default 7 วัน) สำหรับวาดกราฟและคำนวณ burn rate
 - 💰 ใช้ OAuth token ของ Claude Code ที่มีอยู่แล้ว ไม่ต้องเปิด API account แยก
 - 🪶 ค่าใช้จ่ายต่อ poll ≈ 1 token Haiku (สำหรับผู้ใช้ subscription รวมในแพ็คเกจอยู่แล้ว)
+- 🔄 กู้ token หมดอายุอัตโนมัติ — Claude Code หมุน OAuth token เป็นระยะ พอแอปเจอ `401` จะอ่าน token ใหม่จากดิสก์แล้วลองใหม่เองทันที ไม่ต้องปิด-เปิดแอป
+- 🔁 เมนู **Restart** (คลิกขวา) — รีสตาร์ทแอปได้จากเมนูเลย (โหลดโค้ด + token สดใหม่)
 
 <p align="center">
   <img src="assets/features.png" width="900" alt="Features showcase" />
@@ -121,6 +123,8 @@ build.bat
 4. บันทึก snapshot ลง SQLite (`~/.claude-quota-tray/history.db`) สำหรับวาดกราฟ + คำนวณ burn rate
 5. วาดไอคอนใหม่และอัพเดต tooltip + เมนู
 
+> **กรณี token หมดอายุ:** OAuth access token ของ Claude Code เป็น token อายุสั้นและถูกหมุนเป็นระยะ (Claude Code เขียนทับ `.credentials.json` เอง) ถ้า API ตอบ `401` แอปจะอ่าน token ใหม่จากดิสก์แล้วยิงซ้ำ 1 ครั้งอัตโนมัติ ทำให้ไม่ค้างที่ error เอง การกู้คืนแต่ละครั้งจะถูกบันทึกไว้ใน `error.log`
+
 ## โครงสร้างโปรเจกต์
 
 ```
@@ -157,7 +161,7 @@ claude-quota-tray/
 - **Settings + history**: `%USERPROFILE%\.claude-quota-tray\`
   - `settings.json` — accounts, thresholds, schedule, theme, poll interval
   - `history.db` — SQLite snapshot history (default ลบเองเมื่อเกิน 7 วัน)
-  - `error.log` — diagnostic log (สร้างเฉพาะเมื่อมี error เกิดขึ้น)
+  - `error.log` — diagnostic log (error + เหตุการณ์สำคัญ เช่น การกู้ token ตอนเจอ 401)
 
 ## ❓ ไม่เห็นไอคอนใน System Tray?
 
