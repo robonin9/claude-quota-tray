@@ -50,6 +50,12 @@ def _connect() -> sqlite3.Connection:
             )
             """
         )
+        # Additive migration for the separate weekly Opus limit. Old DBs gain
+        # the column; rows written before this stay NULL. Ignored if present.
+        try:
+            _conn.execute("ALTER TABLE snapshots ADD COLUMN opus_pct INTEGER")
+        except sqlite3.OperationalError:
+            pass
         _conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_snapshots_ts ON snapshots(ts)"
         )
@@ -61,13 +67,20 @@ def record(account_id: str, snapshot) -> None:
     """Persist a UsageSnapshot. Errors are swallowed (history is best-effort)."""
     if not getattr(snapshot, "ok", False):
         return
-    if snapshot.session_pct is None and snapshot.weekly_pct is None:
+    if (
+        snapshot.session_pct is None
+        and snapshot.weekly_pct is None
+        and getattr(snapshot, "opus_pct", None) is None
+    ):
         return
     try:
         with _lock:
             conn = _connect()
             conn.execute(
-                "INSERT INTO snapshots VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO snapshots "
+                "(ts, account_id, session_pct, weekly_pct, "
+                " session_reset, weekly_reset, opus_pct) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     snapshot.fetched_at or time.time(),
                     account_id,
@@ -75,6 +88,7 @@ def record(account_id: str, snapshot) -> None:
                     snapshot.weekly_pct,
                     snapshot.session_reset_seconds,
                     snapshot.weekly_reset_seconds,
+                    getattr(snapshot, "opus_pct", None),
                 ),
             )
             conn.commit()
@@ -185,6 +199,115 @@ def export_csv(path: str | Path, hours: float = 24,
             iso = datetime.fromtimestamp(ts).isoformat(sep=" ", timespec="seconds")
             w.writerow([iso, ts, session_pct, weekly_pct])
     return len(rows)
+
+
+def weekly_summary(account_id: Optional[str] = None,
+                   threshold: int = 80) -> dict:
+    """Aggregate the last 7 days of history into a small summary dict.
+
+    Returns peak utilisation per limit, sample count, the local hour-of-day
+    with the highest average 5-hour usage, and how many samples sat at/above
+    ``threshold``. Values are None when there is no data.
+    """
+    cutoff = time.time() - 7 * 86400
+    try:
+        with _lock:
+            conn = _connect()
+            cur = conn.execute(
+                "SELECT ts, session_pct, weekly_pct, opus_pct FROM snapshots "
+                "WHERE ts >= ?" + (" AND account_id = ?" if account_id else "")
+                + " ORDER BY ts",
+                (cutoff, account_id) if account_id else (cutoff,),
+            )
+            rows = cur.fetchall()
+    except sqlite3.Error:
+        rows = []
+
+    if not rows:
+        return {
+            "samples": 0, "peak_session": None, "peak_weekly": None,
+            "peak_opus": None, "busiest_hour": None, "threshold": threshold,
+            "threshold_hits": 0, "first_ts": None, "last_ts": None,
+        }
+
+    from collections import defaultdict
+    import datetime as _dt
+
+    peak_session = max((r[1] for r in rows if r[1] is not None), default=None)
+    peak_weekly = max((r[2] for r in rows if r[2] is not None), default=None)
+    peak_opus = max((r[3] for r in rows if r[3] is not None), default=None)
+    threshold_hits = sum(1 for r in rows if r[1] is not None and r[1] >= threshold)
+
+    by_hour_sum: dict = defaultdict(float)
+    by_hour_n: dict = defaultdict(int)
+    for ts, s, _w, _o in rows:
+        if s is None:
+            continue
+        hour = _dt.datetime.fromtimestamp(ts).hour
+        by_hour_sum[hour] += s
+        by_hour_n[hour] += 1
+    busiest_hour = None
+    if by_hour_n:
+        busiest_hour = max(
+            by_hour_n, key=lambda h: by_hour_sum[h] / by_hour_n[h]
+        )
+
+    return {
+        "samples": len(rows),
+        "peak_session": peak_session,
+        "peak_weekly": peak_weekly,
+        "peak_opus": peak_opus,
+        "busiest_hour": busiest_hour,
+        "threshold": threshold,
+        "threshold_hits": threshold_hits,
+        "first_ts": rows[0][0],
+        "last_ts": rows[-1][0],
+    }
+
+
+def export_weekly_summary(path: str | Path, account_name: str,
+                          account_id: Optional[str] = None,
+                          threshold: int = 80) -> Optional[Path]:
+    """Write a human-readable weekly summary (Markdown). Returns the path,
+    or None when there is no history to summarise."""
+    from datetime import datetime
+    from i18n import t
+
+    data = weekly_summary(account_id, threshold)
+    if not data["samples"]:
+        return None
+
+    def _iso(ts):
+        return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M") if ts else "—"
+
+    def _pct(v):
+        return f"{v}%" if v is not None else "—"
+
+    hour = data["busiest_hour"]
+    hour_txt = f"{hour:02d}:00–{(hour + 1) % 24:02d}:00" if hour is not None else "—"
+
+    lines = [
+        f"# {t('summary.title')}",
+        "",
+        f"- **{t('summary.account')}:** {account_name}",
+        f"- **{t('summary.generated')}:** {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        f"- **{t('summary.range')}:** {_iso(data['first_ts'])} → {_iso(data['last_ts'])}",
+        f"- **{t('summary.samples')}:** {data['samples']}",
+        "",
+        f"- **{t('summary.peak_session')}:** {_pct(data['peak_session'])}",
+        f"- **{t('summary.peak_weekly')}:** {_pct(data['peak_weekly'])}",
+    ]
+    if data["peak_opus"] is not None:
+        lines.append(f"- **{t('summary.peak_opus')}:** {_pct(data['peak_opus'])}")
+    lines += [
+        f"- **{t('summary.busiest_hour')}:** {hour_txt}",
+        f"- **{t('summary.threshold_hits', pct=data['threshold'])}:** {data['threshold_hits']}",
+        "",
+    ]
+
+    p = Path(path)
+    p.write_text("\n".join(lines), encoding="utf-8")
+    return p
 
 
 def prune(retention_days: int) -> None:

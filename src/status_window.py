@@ -164,9 +164,17 @@ def _build_widgets(root: tk.Tk, account_name: str,
     session_bar["frame"].pack(fill="x", pady=(0, 8))
     weekly_bar = build_bar(panel, t('bar.weekly_label'))
     weekly_bar["frame"].pack(fill="x")
+    # Opus weekly bar — only packed when the account exposes that limit.
+    opus_bar = build_bar(panel, t('bar.opus_label'))
 
     footer = tk.Frame(root, bg=c["BG"])
     footer.pack(fill="x", padx=14, pady=(8, 12), side="bottom")
+
+    health_lbl = tk.Label(
+        root, text="", font=ui_font(8),
+        fg=c["MUTED"], bg=c["BG"], anchor="w", justify="left",
+    )
+    health_lbl.pack(fill="x", padx=14, pady=(0, 4), side="bottom")
 
     def _refresh():
         try:
@@ -175,9 +183,16 @@ def _build_widgets(root: tk.Tk, account_name: str,
             data = {}
         apply_bar(session_bar, data.get("session_pct"), data.get("session_reset"))
         apply_bar(weekly_bar, data.get("weekly_pct"), data.get("weekly_reset"))
+        if data.get("opus_pct") is not None:
+            if not opus_bar["frame"].winfo_ismapped():
+                opus_bar["frame"].pack(fill="x", pady=(8, 0))
+            apply_bar(opus_bar, data.get("opus_pct"), data.get("opus_reset"))
+        elif opus_bar["frame"].winfo_ismapped():
+            opus_bar["frame"].pack_forget()
         burn_lbl.configure(text=format_burn(data.get("burn") or {}))
         plan = data.get("plan")
         plan_lbl.configure(text=("· " + plan) if plan else "")
+        health_lbl.configure(text=_health_text(data))
 
     def _btn(text, cmd, side="right", padx=0):
         tk.Button(
@@ -211,6 +226,26 @@ def _build_widgets(root: tk.Tk, account_name: str,
 
     root.protocol("WM_DELETE_WINDOW", on_close)
     root.bind("<Escape>", lambda _e: on_close())
+
+
+def _health_text(data: dict) -> str:
+    """One-line auth health: which source is active + token expiry."""
+    import time as _time
+    from api_client import format_reset
+
+    bits = []
+    src = data.get("token_source")
+    if src:
+        # Keep only the provider prefix (e.g. "claude-desktop:" → "claude-desktop").
+        short = str(src).split(":", 1)[0]
+        bits.append(f"{t('health.source')}: {short}")
+    exp = data.get("token_expires_at")
+    if exp is not None:
+        left = exp - _time.time()
+        note = t('health.expired') if left <= 0 else t('health.expires_in',
+                                                        time=format_reset(int(left)))
+        bits.append(f"{t('health.expires')} {note}")
+    return "   ·   ".join(bits)
 
 
 def _safe_set_topmost(root: tk.Tk, value: bool) -> None:

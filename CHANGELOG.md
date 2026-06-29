@@ -20,6 +20,13 @@ Changes compared to upstream v0.2.0. Tray UI, polling, history, and notification
 - **`UsageSnapshot.http_status`** recorded for diagnostics; 4xx/5xx responses that still carry usable unified headers (e.g. a 429) remain `ok` and keep updating the badge.
 - **Tests:** new `tests/` suite (`test_api_client.py`, `test_history_burn.py`) covering `_pct_from_utilization`, `_seconds_until_reset`, header→snapshot mapping, and burn-rate edge cases. Run with `python -m unittest discover -s tests`.
 
+### New features (UX)
+
+- **Near-reset notification.** When a limit you actually leaned on (≥ 40 %) is within `reset_notice_minutes` (default 10) of resetting, a toast tells you it's almost back. Fires at most once per limit per cycle and re-arms when the window rolls over. Toggle with `notify_before_reset`. Honours the alert snooze.
+- **Adaptive poll interval.** New **Auto (adaptive)** option under *Settings → Check frequency* (`poll_interval_seconds = 0`): polls fast (30 s) when usage is high, climbing quickly, or a window is seconds from resetting; eases off (up to 5 min) when usage is low and flat. Saves request cost while staying responsive when it matters. The fixed 30 s / 1 m / 2 m / 5 m options are unchanged.
+- **Weekly usage summary.** New tray item **Export weekly summary…** writes a Markdown report (peak 5-hour / weekly / Opus utilisation, busiest hour of day, and how many samples hit your alert threshold) from the last 7 days of history and opens it. History now also stores per-snapshot Opus % via an additive `opus_pct` column (old DBs migrate automatically; old rows stay valid).
+- **Opus weekly bar + auth health in the status popup.** The left-click popup now shows a third progress bar for the weekly Opus limit (only when the account exposes it), plus a footer line with the active auth source and token expiry. The tray tooltip also shows a token-expiry warning when it's within 24 hours.
+
 ### Stability / bug fixes (main.py, history.py, desktop_widget.py)
 
 - **CSV export no longer crashes.** `history.export_csv` used the `csv` module without importing it — any "Export CSV" click raised `NameError`. Added the import (covered by a regression test).

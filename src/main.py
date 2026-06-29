@@ -69,6 +69,8 @@ class AppState:
         self.paused_by_schedule = False
         self.setup_notice_shown = False
         self.token_expires_at: Optional[float] = None  # epoch seconds; None = unknown
+        self.token_source: Optional[str] = None         # which auth source is active
+        self.reset_notified = {"session": False, "weekly": False, "opus": False}
         self.auth_retry_after: float = 0.0             # epoch seconds; 0 = no retry pending
         self.auth_401_notified: bool = False            # suppress duplicate toasts
         self.bad_tokens: set = set()                    # token strings rejected with 401
@@ -177,6 +179,7 @@ def _load_active_token() -> None:
         creds = accounts.get_credentials(acct, exclude_tokens=state.bad_tokens or None)
         state.token = creds["token"]
         state.plan = creds.get("plan")
+        state.token_source = creds.get("source")
         state.token_error = None
         state.auth_retry_after = 0.0
         state.auth_401_notified = False
@@ -192,6 +195,7 @@ def _load_active_token() -> None:
         state.active_account = None
         state.token = None
         state.plan = None
+        state.token_source = None
         state.token_error = str(e)
         state.token_expires_at = None
 
@@ -291,6 +295,7 @@ def _poll_loop_inner(icon: pystray.Icon):
                     history.record(acct_id, snapshot)
                     state.burn = history.burn_rate(60, acct_id)
                     _check_notifications(icon, snapshot)
+                    _check_reset_notifications(icon, snapshot)
                 except Exception:
                     _log_action_error("poll_iteration")
                     state.poll_fail_streak = min(state.poll_fail_streak + 1, 8)
@@ -300,7 +305,8 @@ def _poll_loop_inner(icon: pystray.Icon):
                 _maybe_notify_update(icon)
 
         _maybe_prune()
-        base = int(user_settings.get("poll_interval_seconds", config.POLL_INTERVAL_SECONDS))
+        configured = int(user_settings.get("poll_interval_seconds", config.POLL_INTERVAL_SECONDS))
+        base = _compute_auto_interval() if configured == 0 else configured
         if state.poll_fail_streak > 0:
             interval = min(600, base * (2 ** min(state.poll_fail_streak, 4)))
         else:
@@ -408,6 +414,13 @@ def _build_tooltip() -> str:
         else:
             ago_s = f"{ago // 3600}h"
         body += "\n" + t("status.last_poll", ago=ago_s)
+    # Surface token expiry only when it's close enough to act on.
+    if state.token_expires_at is not None:
+        left = state.token_expires_at - time.time()
+        if left <= 86400:
+            note = (t('health.expired') if left <= 0
+                    else t('health.expires_in', time=format_reset(int(left))))
+            body += "\n" + f"{t('health.expires')} {note}"
     return _truncate(f"{header}\n{body}")
 
 
@@ -453,6 +466,87 @@ def _check_notifications(icon: pystray.Icon, snap: UsageSnapshot):
                 )
                 if play_sound:
                     sound.play_alert()
+
+
+# Only bother announcing a reset for a limit the user actually leaned on.
+_RESET_NOTICE_MIN_PCT = 40
+
+
+def _check_reset_notifications(icon: pystray.Icon, snap: UsageSnapshot) -> None:
+    """Notify once when a meaningfully-used limit is about to reset.
+
+    'About to' = within ``reset_notice_minutes`` (default 10). Re-arms when the
+    reset window rolls over (reset_seconds climbs back up), so each cycle fires
+    at most one toast per limit.
+    """
+    if not snap.ok or not snap.has_data:
+        return
+    if not bool(user_settings.get("notify_before_reset", True)):
+        return
+    snooze = float(user_settings.get("alert_snooze_until") or 0)
+    if snooze > time.time():
+        return
+    window = int(user_settings.get("reset_notice_minutes", 10)) * 60
+
+    triples = [
+        ("session", snap.session_pct, snap.session_reset_seconds, t('bar.session_short')),
+        ("weekly", snap.weekly_pct, snap.weekly_reset_seconds, t('bar.weekly_short')),
+        ("opus", snap.opus_pct, snap.opus_reset_seconds, t('bar.opus_short')),
+    ]
+    for key, pct, reset_secs, label in triples:
+        if pct is None or reset_secs is None:
+            continue
+        if reset_secs > window:
+            # Window is far out again → re-arm for the next cycle.
+            state.reset_notified[key] = False
+            continue
+        if pct < _RESET_NOTICE_MIN_PCT:
+            continue
+        if not state.reset_notified.get(key):
+            state.reset_notified[key] = True
+            notifications.notify(
+                icon,
+                t('toast.reset_soon_title', app=config.APP_NAME),
+                t('toast.reset_soon_body', label=label, pct=pct,
+                  time=format_reset(reset_secs)),
+            )
+
+
+# Auto poll interval (settings poll_interval_seconds == 0). Bounds in seconds.
+_AUTO_MIN, _AUTO_MAX = 30, 300
+
+
+def _compute_auto_interval() -> int:
+    """Adaptive poll interval from current usage + burn rate.
+
+    Polls fast when usage is high, climbing quickly, or a window is about to
+    reset (to catch the drop); slows down when usage is low and flat.
+    """
+    snap = state.snapshot
+    if snap is None or not snap.has_data:
+        return 60
+    pcts = [p for p in (snap.session_pct, snap.weekly_pct, snap.opus_pct) if p is not None]
+    pct = max(pcts) if pcts else 0
+
+    max_rate = 0.0
+    for info in (state.burn or {}).values():
+        rate = (info or {}).get("rate")
+        if rate:
+            max_rate = max(max_rate, rate)
+
+    soonest_reset = min(
+        [r for r in (snap.session_reset_seconds, snap.weekly_reset_seconds,
+                     snap.opus_reset_seconds) if r is not None],
+        default=None,
+    )
+
+    if pct >= 90 or max_rate >= 15 or (soonest_reset is not None and soonest_reset <= 120):
+        return _AUTO_MIN
+    if pct >= 70 or max_rate >= 5:
+        return 45
+    if pct < 40 and max_rate < 1:
+        return _AUTO_MAX
+    return 90
 
 
 # --- Menu actions ---------------------------------------------------------
@@ -782,6 +876,8 @@ def _current_data() -> dict:
         "opus_reset": snap.opus_reset_seconds if snap else None,
         "burn": state.burn,
         "plan": state.plan,
+        "token_source": state.token_source,
+        "token_expires_at": state.token_expires_at,
     }
 
 
@@ -794,6 +890,37 @@ def action_show_history(icon, item):
         state.active_account["name"],
         get_data=_current_data,
     )
+
+
+def action_export_weekly_summary(icon, item):
+    if not state.active_account:
+        notifications.notify(icon, config.APP_NAME, t('status.no_account'))
+        return
+
+    def work():
+        try:
+            out = user_settings.SETTINGS_DIR / "weekly-summary.md"
+            result = history.export_weekly_summary(
+                out,
+                state.active_account["name"],
+                state.active_account["id"],
+                threshold=(_thresholds_for("session") or [80])[0],
+            )
+            if result is None:
+                notifications.notify(icon, config.APP_NAME, t('toast.summary_empty'))
+                return
+            notifications.notify(
+                icon, config.APP_NAME,
+                t('toast.summary_saved', path=str(result)),
+            )
+            try:
+                app_platform.open_path(result)
+            except Exception:
+                pass
+        except Exception:
+            _log_action_error("export_weekly_summary")
+
+    threading.Thread(target=work, daemon=True).start()
 
 
 def _on_settings_changed(icon: pystray.Icon):
@@ -973,6 +1100,7 @@ def build_menu():
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(t('menu.show_status'), action_show_status, default=True),
         pystray.MenuItem(t('menu.show_history'), action_show_history),
+        pystray.MenuItem(t('menu.weekly_summary'), action_export_weekly_summary),
         pystray.MenuItem(t('menu.refresh_now'), action_refresh),
         pystray.MenuItem(t('menu.copy_status'), action_copy_status),
         pystray.MenuItem(t('menu.snooze_alerts'), action_snooze_alerts),
@@ -1100,6 +1228,7 @@ def _build_settings_menu():
             radio=True,
         )
         for label, seconds in (
+            (t('menu.interval_auto'), 0),
             (t('menu.interval_30s'), 30),
             (t('menu.interval_1m'), 60),
             (t('menu.interval_2m'), 120),

@@ -23,7 +23,8 @@ class HistoryDbTests(unittest.TestCase):
                 session_pct INTEGER,
                 weekly_pct INTEGER,
                 session_reset INTEGER,
-                weekly_reset INTEGER
+                weekly_reset INTEGER,
+                opus_pct INTEGER
             )
             """
         )

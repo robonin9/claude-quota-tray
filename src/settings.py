@@ -46,6 +46,8 @@ def _defaults() -> Dict[str, Any]:
             "click_action": "status",
         },
         "sound_alerts": True,
+        "notify_before_reset": True,   # toast when a used-up limit is about to reset
+        "reset_notice_minutes": 10,    # how early to fire that toast
         "schedule": {
             "enabled": False,
             "start_hour": 9,
