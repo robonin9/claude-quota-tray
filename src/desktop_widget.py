@@ -29,17 +29,19 @@ def is_supported() -> bool:
 def show(get_data: SnapshotFetcher, on_click: ClickHandler) -> None:
     if not is_supported():
         return
-    global _refresh_cb
-    _refresh_cb = lambda: _apply_data(get_data())
     with _window_lock:
-        if _widget is not None:
-            try:
-                _widget.after(0, _bring_to_front)
-                if _refresh_cb:
-                    _widget.after(0, _refresh_cb)
-                return
-            except tk.TclError:
-                pass
+        w = _widget
+    if w is not None:
+        # Already showing — just bring forward and repaint with latest data.
+        # `_refresh_cb` is the bar-applying callback set in _run(); do NOT
+        # reassign it here or _apply_data() would recurse into itself.
+        try:
+            w.after(0, _bring_to_front)
+            if _refresh_cb is not None:
+                w.after(0, _refresh_cb)
+            return
+        except tk.TclError:
+            pass
     threading.Thread(target=_run, args=(get_data, on_click), daemon=True).start()
 
 
@@ -60,10 +62,10 @@ def refresh(get_data: SnapshotFetcher) -> None:
     # under us between the check and the .after() call (poll thread vs UI).
     with _window_lock:
         w = _widget
-    if w is None:
+    if w is None or _refresh_cb is None:
         return
     try:
-        w.after(0, lambda: _apply_data(get_data()))
+        w.after(0, _refresh_cb)
     except (tk.TclError, RuntimeError):
         pass
 
@@ -150,6 +152,7 @@ def _run(get_data: SnapshotFetcher, on_click: ClickHandler) -> None:
     state = {"session": session_bar, "weekly": weekly_bar}
 
     def _apply():
+        refresh_color_constants()
         data = get_data()
         apply_compact_bar(state["session"], data.get("session_pct"))
         apply_compact_bar(state["weekly"], data.get("weekly_pct"))
@@ -163,12 +166,3 @@ def _run(get_data: SnapshotFetcher, on_click: ClickHandler) -> None:
     with _window_lock:
         if _widget is root:
             _widget = None
-
-
-def _apply_data(get_data: SnapshotFetcher) -> None:
-    if _widget is None:
-        return
-    refresh_color_constants()
-    # Re-find bars via children — stored in closure in _run only; use _refresh_cb path
-    if _refresh_cb:
-        _refresh_cb()
