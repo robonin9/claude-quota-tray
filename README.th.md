@@ -104,6 +104,10 @@
 **Settings → Icon style** — เลือกรูปแบบไอคอน (กรอบ / ทึบ / โดนัท / แถบ)  
 **Settings → Tray icon shows** — เลือกว่าจะแสดง % จาก Session, Weekly หรือค่าสูงสุดของทั้งสอง
 
+<p align="center">
+  <img src="assets/tray-menu.png" width="760" alt="เมนูคลิกขวา พร้อม progress bar ในเมนู" />
+</p>
+
 ### ประวัติและกราฟ
 
 - เมนู **History** → กราฟ **Session** และ **Weekly** แยกแผง
@@ -112,6 +116,10 @@
 - **ส่งออก CSV** สำหรับวิเคราะห์เอง
 
 > เลือก **30 วัน** ครั้งแรก แอปจะขยายเวลาเก็บประวัติให้อัตโนมัติ (เป็นอย่างน้อย 31 วัน เพิ่มขึ้นเท่านั้น) เพื่อให้กราฟรายเดือนมีข้อมูลครบ
+
+<p align="center">
+  <img src="assets/monthly.png" width="760" alt="กราฟรายเดือน 30 วัน — แนวโน้ม Session/Weekly ทั้งเดือน" />
+</p>
 
 ข้อมูลเก็บใน `history.db` ที่โฟลเดอร์ผู้ใช้ (ค่าเริ่มต้นเก็บ 7 วัน)
 
@@ -130,6 +138,10 @@
 - แยกเกณฑ์ **Session** และ **Weekly** ได้
 - **เสียงเตือน** เปิด/ปิดได้ (Windows)
 - **Snooze alerts** — ปิดการแจ้งเตือนชั่วคราว 1 ชม. จากเมนู
+
+<p align="center">
+  <img src="assets/alerts.png" width="760" alt="การแจ้งเตือน toast + ระดับสีตามเปอร์เซ็นต์การใช้งาน" />
+</p>
 
 ### Desktop widget (Windows)
 
