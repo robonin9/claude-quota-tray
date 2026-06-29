@@ -258,6 +258,7 @@ def _poll_loop_inner(icon: pystray.Icon):
                 _load_active_token()
 
             if state.token:
+<<<<<<< HEAD
                 # Guard the whole fetch→record→notify path: a network blip,
                 # token loss, an unexpected API schema change, or a SQLite
                 # hiccup must never kill the poller — log it and back off.
@@ -299,6 +300,33 @@ def _poll_loop_inner(icon: pystray.Icon):
                 except Exception:
                     _log_action_error("poll_iteration")
                     state.poll_fail_streak = min(state.poll_fail_streak + 1, 8)
+=======
+                snapshot = fetch_usage(state.token, model=config.MODEL)
+                if not snapshot.ok and snapshot.status_code == 401:
+                    # The OAuth access token likely rotated on disk (Claude
+                    # Code refreshes it periodically). Re-read credentials and
+                    # retry once before surfacing the error.
+                    stale = state.token
+                    _load_active_token()
+                    if state.token and not state.token_error:
+                        rotated = state.token != stale
+                        snapshot = fetch_usage(state.token, model=config.MODEL)
+                        _log_info(
+                            "401 -> re-read token "
+                            f"({'rotated' if rotated else 'unchanged'}), "
+                            f"retried -> {'ok' if snapshot.ok else 'still failing'}"
+                        )
+                    else:
+                        _log_info(
+                            "401 -> re-read token failed: "
+                            f"{state.token_error or 'no token'}"
+                        )
+                state.snapshot = snapshot
+                acct_id = state.active_account["id"] if state.active_account else "unknown"
+                history.record(acct_id, snapshot)
+                state.burn = history.burn_rate(60, acct_id)
+                _check_notifications(icon, snapshot)
+>>>>>>> upstream/main
             _refresh_icon(icon)
             if not state.update_check_done:
                 state.update_check_done = True
@@ -567,6 +595,20 @@ def _log_action_error(where: str) -> None:
         pass
 
 
+def _log_info(message: str) -> None:
+    """Append a single timestamped info line to the shared log file.
+
+    Used for noteworthy-but-not-fatal events (e.g. an OAuth token rotation
+    that we recovered from) so they can be confirmed after the fact."""
+    try:
+        log = Path.home() / ".claude-quota-tray" / "error.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with open(log, "a", encoding="utf-8") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
+    except Exception:
+        pass
+
+
 def action_show_status(icon, item):
     """Left-click action: open the compact status popup with progress bars.
     Falls back to the full history window if the popup fails to spawn."""
@@ -704,6 +746,7 @@ def action_quit(icon, item):
     icon.stop()
 
 
+<<<<<<< HEAD
 def _try_open_claude_desktop() -> bool:
     return app_platform.open_claude_desktop()
 
@@ -740,6 +783,17 @@ def action_reauth(icon, item):
             )
         state.force_refresh.set()
     threading.Thread(target=_delayed_retry, daemon=True).start()
+=======
+def action_restart(icon, item):
+    """Right-click menu: relaunch the app (picks up a fresh token + new code).
+
+    Runs on a worker thread because _restart_app sleeps briefly and then tears
+    down pystray, which must not block this menu callback / message loop.
+    """
+    threading.Thread(
+        target=_restart_app, args=(icon,), daemon=True,
+    ).start()
+>>>>>>> upstream/main
 
 
 def action_open_repo(icon, item):
@@ -1123,8 +1177,12 @@ def build_menu():
         pystray.MenuItem(t('menu.weekly_summary'), action_export_weekly_summary),
         pystray.MenuItem(t('menu.monthly_summary'), action_export_monthly_summary),
         pystray.MenuItem(t('menu.refresh_now'), action_refresh),
+<<<<<<< HEAD
         pystray.MenuItem(t('menu.copy_status'), action_copy_status),
         pystray.MenuItem(t('menu.snooze_alerts'), action_snooze_alerts),
+=======
+        pystray.MenuItem(t('menu.restart'), action_restart),
+>>>>>>> upstream/main
         pystray.MenuItem(
             t('menu.show_last_error'),
             action_show_error,
