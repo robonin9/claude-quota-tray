@@ -20,6 +20,12 @@ Changes compared to upstream v0.2.0. Tray UI, polling, history, and notification
 - **`UsageSnapshot.http_status`** recorded for diagnostics; 4xx/5xx responses that still carry usable unified headers (e.g. a 429) remain `ok` and keep updating the badge.
 - **Tests:** new `tests/` suite (`test_api_client.py`, `test_history_burn.py`) covering `_pct_from_utilization`, `_seconds_until_reset`, header→snapshot mapping, and burn-rate edge cases. Run with `python -m unittest discover -s tests`.
 
+### Auth coverage (auth_discovery.py, token_reader.py, accounts.py, main.py)
+
+- **Fallback past invalid tokens.** When the active token returns 401/403, the app now records it as bad and falls through to the next discovery source (env → Desktop → Credential Manager → credential files) instead of getting stuck retrying the dead one. `read_credentials` / `get_credentials` take an `exclude_tokens` set; the bad-token list is cleared on manual re-auth, account switch, and settings changes (so a fresh login at the same source is retried). Exclusion is by exact token value, so a re-login auto-heals.
+- **Clearer auth errors.** Auth failures are detected via `http_status` (401/403) as well as the message text, and when every discovered token is rejected the error explicitly says so and tells the user to sign in again.
+- **Richer `--probe` diagnostics.** `python src/token_reader.py --probe` now reports, per source: the resolved sub-source, a token fingerprint (so two sources sharing one token are obvious), the detected plan, and expiry status (`expires in 319d` / `EXPIRED`). Output is ASCII-safe for the Windows console.
+
 ### Added
 
 - **History UI** — separate Session / Weekly chart panels, 24h / 7d range, CSV export, hover tooltips (`chart_widget.py`).

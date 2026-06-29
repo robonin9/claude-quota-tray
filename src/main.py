@@ -71,6 +71,7 @@ class AppState:
         self.token_expires_at: Optional[float] = None  # epoch seconds; None = unknown
         self.auth_retry_after: float = 0.0             # epoch seconds; 0 = no retry pending
         self.auth_401_notified: bool = False            # suppress duplicate toasts
+        self.bad_tokens: set = set()                    # token strings rejected with 401
         self.last_poll_at: float = 0.0
         self.poll_fail_streak: int = 0
         self.update_check_done: bool = False
@@ -155,6 +156,16 @@ def _maybe_show_setup_notice(icon: pystray.Icon) -> None:
     )
 
 
+def _is_auth_failure(snapshot) -> bool:
+    """True if a snapshot failed because the token is invalid/expired (401/403)."""
+    if snapshot.ok:
+        return False
+    if getattr(snapshot, "http_status", None) in (401, 403):
+        return True
+    err = snapshot.error or ""
+    return "401" in err or "403" in err
+
+
 _TOKEN_REFRESH_AHEAD_SECS = 300  # reload token 5 min before it expires
 
 
@@ -163,7 +174,7 @@ def _load_active_token() -> None:
     try:
         acct = accounts.active_account()
         state.active_account = acct
-        creds = accounts.get_credentials(acct)
+        creds = accounts.get_credentials(acct, exclude_tokens=state.bad_tokens or None)
         state.token = creds["token"]
         state.plan = creds.get("plan")
         state.token_error = None
@@ -244,11 +255,17 @@ def _poll_loop_inner(icon: pystray.Icon):
 
             if state.token:
                 snapshot = fetch_usage(state.token, model=config.MODEL)
-                if (
-                    not snapshot.ok
-                    and snapshot.error
-                    and "401" in snapshot.error
-                ):
+                if _is_auth_failure(snapshot):
+                    failed_token = state.token
+                    # Remember this token as bad and try the next source.
+                    if failed_token:
+                        state.bad_tokens.add(failed_token)
+                    _load_active_token()
+                    if state.token and state.token != failed_token:
+                        # A different source had a usable token — retry it now
+                        # instead of backing off on the dead one.
+                        state.force_refresh.set()
+                        continue
                     if not state.auth_401_notified:
                         state.auth_401_notified = True
                         notifications.notify(
@@ -594,6 +611,7 @@ def action_reauth(icon, item):
     """Re-authenticate: reload token immediately; open Claude Desktop if needed."""
     state.auth_retry_after = 0.0
     state.auth_401_notified = False
+    state.bad_tokens.clear()
     _load_active_token()
     if state.token:
         notifications.notify(icon, config.APP_NAME, t('toast.reauth_ok'))
@@ -774,6 +792,7 @@ def action_show_history(icon, item):
 def _on_settings_changed(icon: pystray.Icon):
     def _cb():
         state.fired_thresholds = {"session": set(), "weekly": set(), "opus": set()}
+        state.bad_tokens.clear()
         _load_active_token()
         state.force_refresh.set()
         _sync_desktop_widget(icon)
@@ -800,6 +819,7 @@ def _make_switch_account(account_id: str):
     def _do(icon, item):
         accounts.set_active(account_id)
         state.fired_thresholds = {"session": set(), "weekly": set(), "opus": set()}
+        state.bad_tokens.clear()
         _load_active_token()
         state.force_refresh.set()
         _refresh_icon(icon, update_menu=True)

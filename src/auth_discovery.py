@@ -91,17 +91,27 @@ def _providers_for_platform() -> list[tuple[str, Provider]]:
     return chain
 
 
-def read_credentials() -> dict:
+def read_credentials(exclude_tokens: Optional[set] = None) -> dict:
     """
     Return {"token", "plan", "raw", "source"} from the first working provider.
 
+    ``exclude_tokens`` lets the caller skip token values already known to be
+    invalid (e.g. a source whose token returned 401), so discovery falls
+    through to the next source instead of getting stuck on a stale token.
+
     Raises TokenError with a summary of everything that was tried.
     """
+    exclude = exclude_tokens or set()
     failures: list[str] = []
+    skipped_bad = False
     for name, provider in _providers_for_platform():
         try:
             creds = provider()
             if creds and creds.get("token"):
+                if creds["token"] in exclude:
+                    skipped_bad = True
+                    failures.append(f"{name}: token rejected earlier (skipped)")
+                    continue
                 creds.setdefault("source", name)
                 return creds
             failures.append(f"{name}: not found")
@@ -110,23 +120,62 @@ def read_credentials() -> dict:
         except Exception as e:
             failures.append(f"{name}: {type(e).__name__}: {e}")
 
-    raise TokenError(_format_failure_summary(failures))
+    summary = _format_failure_summary(failures)
+    if skipped_bad:
+        summary = (
+            "All discovered tokens were rejected (expired or invalid). "
+            "Sign in again to Claude Desktop or Claude Code.\n\n" + summary
+        )
+    raise TokenError(summary)
+
+
+def _token_fingerprint(token: str) -> str:
+    token = token.strip()
+    if len(token) <= 12:
+        return f"len={len(token)}"
+    return f"{token[:6]}...{token[-4:]} (len {len(token)})"
+
+
+def _expiry_note(creds: dict) -> str:
+    """Human note about token expiry, if the source exposes it."""
+    raw = creds.get("raw") or {}
+    expires_ms = None
+    for key in ("expiresAt", "expires_at", "expiry"):
+        val = raw.get(key) if isinstance(raw, dict) else None
+        if isinstance(val, (int, float)):
+            expires_ms = float(val)
+            break
+    if expires_ms is None:
+        return ""
+    secs = expires_ms / 1000.0 - time.time()
+    if secs <= 0:
+        return ", EXPIRED"
+    if secs < 3600:
+        return f", expires in {int(secs // 60)}m"
+    if secs < 86400:
+        return f", expires in {int(secs // 3600)}h"
+    return f", expires in {int(secs // 86400)}d"
 
 
 def probe_auth_sources() -> list[AuthProbeResult]:
-    """Try every provider independently (for diagnostics on a new machine)."""
+    """Try every provider independently (for diagnostics on a new machine).
+
+    Reports, per source: whether anything was found, the resolved sub-source,
+    a token fingerprint (so two sources sharing one token are obvious),
+    the detected plan, and expiry status when available.
+    """
     results: list[AuthProbeResult] = []
     for name, provider in _providers_for_platform():
         try:
             creds = provider()
             if creds and creds.get("token"):
                 src = creds.get("source", name)
-                plan = creds.get("plan") or "—"
-                results.append(
-                    AuthProbeResult(name, True, f"OK ({src}, plan={plan})")
-                )
+                plan = creds.get("plan") or "-"
+                fp = _token_fingerprint(creds["token"])
+                detail = f"OK | {src} | {fp} | plan={plan}{_expiry_note(creds)}"
+                results.append(AuthProbeResult(name, True, detail))
             else:
-                results.append(AuthProbeResult(name, False, "not found"))
+                results.append(AuthProbeResult(name, False, "not found / not applicable"))
         except TokenError as e:
             results.append(AuthProbeResult(name, False, str(e)[:200]))
         except Exception as e:

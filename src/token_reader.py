@@ -273,15 +273,17 @@ def read_token() -> str:
     return read_credentials()["token"]
 
 
-def read_credentials() -> dict:
+def read_credentials(exclude_tokens: Optional[set] = None) -> dict:
     """
     Return {"token": str, "plan": Optional[str], "raw": dict, "source": str}.
 
     Delegates to auth_discovery which tries every supported source for this OS.
+    ``exclude_tokens`` skips token values already known to be invalid so
+    discovery falls through to the next source.
     """
     from auth_discovery import read_credentials as discover
 
-    return discover()
+    return discover(exclude_tokens=exclude_tokens)
 
 
 if __name__ == "__main__":
