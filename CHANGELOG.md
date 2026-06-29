@@ -20,6 +20,13 @@ Changes compared to upstream v0.2.0. Tray UI, polling, history, and notification
 - **`UsageSnapshot.http_status`** recorded for diagnostics; 4xx/5xx responses that still carry usable unified headers (e.g. a 429) remain `ok` and keep updating the badge.
 - **Tests:** new `tests/` suite (`test_api_client.py`, `test_history_burn.py`) covering `_pct_from_utilization`, `_seconds_until_reset`, header→snapshot mapping, and burn-rate edge cases. Run with `python -m unittest discover -s tests`.
 
+### Stability / bug fixes (main.py, history.py, desktop_widget.py)
+
+- **CSV export no longer crashes.** `history.export_csv` used the `csv` module without importing it — any "Export CSV" click raised `NameError`. Added the import (covered by a regression test).
+- **Poll loop is now crash-proof per iteration.** The fetch → record → burn-rate → notify path is wrapped so a network drop, DNS failure, lost token, unexpected API schema change, or SQLite hiccup logs to `error.log` and backs off (exponential, capped) instead of bubbling out and forcing a full poller restart.
+- **SQLite concurrency hardened.** History opens in **WAL** mode with a `busy_timeout`, so the chart window's reads don't block the poller's writes (and vice-versa) and brief locks resolve instead of erroring.
+- **Tray/Tk race hardened.** `desktop_widget.refresh()` (called from the poll thread) now snapshots the window reference under its lock before `.after()`, so a concurrent `hide()` on the UI thread can't trigger an `AttributeError`. Confirms the existing rule: the poll thread only ever marshals UI work via `after()`/badge updates, never touches the Win32 menu directly.
+
 ### Auth coverage (auth_discovery.py, token_reader.py, accounts.py, main.py)
 
 - **Fallback past invalid tokens.** When the active token returns 401/403, the app now records it as bad and falls through to the next discovery source (env → Desktop → Credential Manager → credential files) instead of getting stuck retrying the dead one. `read_credentials` / `get_credentials` take an `exclude_tokens` set; the bad-token list is cleared on manual re-auth, account switch, and settings changes (so a fresh login at the same source is retried). Exclusion is by exact token value, so a re-login auto-heals.

@@ -8,6 +8,7 @@ Used for:
 
 from __future__ import annotations
 
+import csv
 import sqlite3
 import threading
 import time
@@ -27,7 +28,16 @@ def _connect() -> sqlite3.Connection:
     global _conn
     if _conn is None:
         SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
-        _conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+        _conn = sqlite3.connect(
+            str(DB_PATH), check_same_thread=False, timeout=10.0
+        )
+        # WAL keeps the chart window's reads from blocking the poller's writes;
+        # busy_timeout lets a brief lock resolve itself instead of erroring.
+        try:
+            _conn.execute("PRAGMA journal_mode=WAL")
+            _conn.execute("PRAGMA busy_timeout=5000")
+        except sqlite3.Error:
+            pass
         _conn.execute(
             """
             CREATE TABLE IF NOT EXISTS snapshots (

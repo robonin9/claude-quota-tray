@@ -254,39 +254,46 @@ def _poll_loop_inner(icon: pystray.Icon):
                 _load_active_token()
 
             if state.token:
-                snapshot = fetch_usage(state.token, model=config.MODEL)
-                if _is_auth_failure(snapshot):
-                    failed_token = state.token
-                    # Remember this token as bad and try the next source.
-                    if failed_token:
-                        state.bad_tokens.add(failed_token)
-                    _load_active_token()
-                    if state.token and state.token != failed_token:
-                        # A different source had a usable token — retry it now
-                        # instead of backing off on the dead one.
-                        state.force_refresh.set()
-                        continue
-                    if not state.auth_401_notified:
-                        state.auth_401_notified = True
-                        notifications.notify(
-                            icon,
-                            t('toast.auth_expired_title', app=config.APP_NAME),
-                            t('toast.auth_expired_body'),
-                        )
-                    if not state.auth_retry_after:
-                        state.auth_retry_after = time.time() + 30.0
-                    state.poll_fail_streak = min(state.poll_fail_streak + 1, 8)
-                else:
-                    if snapshot.ok:
-                        state.poll_fail_streak = 0
-                        state.last_poll_at = time.time()
-                    elif snapshot.error:
+                # Guard the whole fetch→record→notify path: a network blip,
+                # token loss, an unexpected API schema change, or a SQLite
+                # hiccup must never kill the poller — log it and back off.
+                try:
+                    snapshot = fetch_usage(state.token, model=config.MODEL)
+                    if _is_auth_failure(snapshot):
+                        failed_token = state.token
+                        # Remember this token as bad and try the next source.
+                        if failed_token:
+                            state.bad_tokens.add(failed_token)
+                        _load_active_token()
+                        if state.token and state.token != failed_token:
+                            # A different source had a usable token — retry it
+                            # now instead of backing off on the dead one.
+                            state.force_refresh.set()
+                            continue
+                        if not state.auth_401_notified:
+                            state.auth_401_notified = True
+                            notifications.notify(
+                                icon,
+                                t('toast.auth_expired_title', app=config.APP_NAME),
+                                t('toast.auth_expired_body'),
+                            )
+                        if not state.auth_retry_after:
+                            state.auth_retry_after = time.time() + 30.0
                         state.poll_fail_streak = min(state.poll_fail_streak + 1, 8)
-                state.snapshot = snapshot
-                acct_id = state.active_account["id"] if state.active_account else "unknown"
-                history.record(acct_id, snapshot)
-                state.burn = history.burn_rate(60, acct_id)
-                _check_notifications(icon, snapshot)
+                    else:
+                        if snapshot.ok:
+                            state.poll_fail_streak = 0
+                            state.last_poll_at = time.time()
+                        elif snapshot.error:
+                            state.poll_fail_streak = min(state.poll_fail_streak + 1, 8)
+                    state.snapshot = snapshot
+                    acct_id = state.active_account["id"] if state.active_account else "unknown"
+                    history.record(acct_id, snapshot)
+                    state.burn = history.burn_rate(60, acct_id)
+                    _check_notifications(icon, snapshot)
+                except Exception:
+                    _log_action_error("poll_iteration")
+                    state.poll_fail_streak = min(state.poll_fail_streak + 1, 8)
             _refresh_icon(icon)
             if not state.update_check_done:
                 state.update_check_done = True

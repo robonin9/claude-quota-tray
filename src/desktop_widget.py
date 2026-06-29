@@ -56,11 +56,15 @@ def hide() -> None:
 
 
 def refresh(get_data: SnapshotFetcher) -> None:
-    if _widget is None:
+    # Grab a local reference under the lock: hide() may null _widget out from
+    # under us between the check and the .after() call (poll thread vs UI).
+    with _window_lock:
+        w = _widget
+    if w is None:
         return
     try:
-        _widget.after(0, lambda: _apply_data(get_data()))
-    except tk.TclError:
+        w.after(0, lambda: _apply_data(get_data()))
+    except (tk.TclError, RuntimeError):
         pass
 
 
