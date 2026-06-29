@@ -201,15 +201,17 @@ def export_csv(path: str | Path, hours: float = 24,
     return len(rows)
 
 
-def weekly_summary(account_id: Optional[str] = None,
+def period_summary(days: int = 7, account_id: Optional[str] = None,
                    threshold: int = 80) -> dict:
-    """Aggregate the last 7 days of history into a small summary dict.
+    """Aggregate the last ``days`` days of history into a small summary dict.
 
     Returns peak utilisation per limit, sample count, the local hour-of-day
     with the highest average 5-hour usage, and how many samples sat at/above
-    ``threshold``. Values are None when there is no data.
+    ``threshold``. Values are None when there is no data. Note that history
+    older than ``history_retention_days`` has been pruned, so the covered
+    range (first_ts → last_ts) may be shorter than ``days``.
     """
-    cutoff = time.time() - 7 * 86400
+    cutoff = time.time() - max(1, days) * 86400
     try:
         with _lock:
             conn = _connect()
@@ -265,15 +267,21 @@ def weekly_summary(account_id: Optional[str] = None,
     }
 
 
-def export_weekly_summary(path: str | Path, account_name: str,
+def weekly_summary(account_id: Optional[str] = None,
+                   threshold: int = 80) -> dict:
+    """Back-compat wrapper: a 7-day :func:`period_summary`."""
+    return period_summary(7, account_id, threshold)
+
+
+def export_period_summary(path: str | Path, account_name: str, days: int = 7,
                           account_id: Optional[str] = None,
                           threshold: int = 80) -> Optional[Path]:
-    """Write a human-readable weekly summary (Markdown). Returns the path,
-    or None when there is no history to summarise."""
+    """Write a human-readable usage summary (Markdown) over ``days`` days.
+    Returns the path, or None when there is no history to summarise."""
     from datetime import datetime
     from i18n import t
 
-    data = weekly_summary(account_id, threshold)
+    data = period_summary(days, account_id, threshold)
     if not data["samples"]:
         return None
 
@@ -291,7 +299,7 @@ def export_weekly_summary(path: str | Path, account_name: str,
         "",
         f"- **{t('summary.account')}:** {account_name}",
         f"- **{t('summary.generated')}:** {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-        f"- **{t('summary.range')}:** {_iso(data['first_ts'])} → {_iso(data['last_ts'])}",
+        f"- **{t('summary.range', days=days)}:** {_iso(data['first_ts'])} → {_iso(data['last_ts'])}",
         f"- **{t('summary.samples')}:** {data['samples']}",
         "",
         f"- **{t('summary.peak_session')}:** {_pct(data['peak_session'])}",
@@ -308,6 +316,13 @@ def export_weekly_summary(path: str | Path, account_name: str,
     p = Path(path)
     p.write_text("\n".join(lines), encoding="utf-8")
     return p
+
+
+def export_weekly_summary(path: str | Path, account_name: str,
+                          account_id: Optional[str] = None,
+                          threshold: int = 80) -> Optional[Path]:
+    """Back-compat wrapper: a 7-day :func:`export_period_summary`."""
+    return export_period_summary(path, account_name, 7, account_id, threshold)
 
 
 def prune(retention_days: int) -> None:

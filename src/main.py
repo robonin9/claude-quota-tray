@@ -892,17 +892,29 @@ def action_show_history(icon, item):
     )
 
 
-def action_export_weekly_summary(icon, item):
+def _export_summary(icon, days: int, filename: str) -> None:
     if not state.active_account:
         notifications.notify(icon, config.APP_NAME, t('status.no_account'))
         return
 
     def work():
         try:
-            out = user_settings.SETTINGS_DIR / "weekly-summary.md"
-            result = history.export_weekly_summary(
+            # So future summaries actually cover the period, make sure history
+            # is retained at least as long as the report window. Transparent:
+            # only bumps upward and tells the user when it does.
+            retention = int(user_settings.get("history_retention_days", 7))
+            if retention < days:
+                user_settings.update(history_retention_days=days + 1)
+                notifications.notify(
+                    icon, config.APP_NAME,
+                    t('toast.summary_retention', days=days + 1),
+                )
+
+            out = user_settings.SETTINGS_DIR / filename
+            result = history.export_period_summary(
                 out,
                 state.active_account["name"],
+                days,
                 state.active_account["id"],
                 threshold=(_thresholds_for("session") or [80])[0],
             )
@@ -918,9 +930,17 @@ def action_export_weekly_summary(icon, item):
             except Exception:
                 pass
         except Exception:
-            _log_action_error("export_weekly_summary")
+            _log_action_error("export_summary")
 
     threading.Thread(target=work, daemon=True).start()
+
+
+def action_export_weekly_summary(icon, item):
+    _export_summary(icon, 7, "weekly-summary.md")
+
+
+def action_export_monthly_summary(icon, item):
+    _export_summary(icon, 30, "monthly-summary.md")
 
 
 def _on_settings_changed(icon: pystray.Icon):
@@ -1101,6 +1121,7 @@ def build_menu():
         pystray.MenuItem(t('menu.show_status'), action_show_status, default=True),
         pystray.MenuItem(t('menu.show_history'), action_show_history),
         pystray.MenuItem(t('menu.weekly_summary'), action_export_weekly_summary),
+        pystray.MenuItem(t('menu.monthly_summary'), action_export_monthly_summary),
         pystray.MenuItem(t('menu.refresh_now'), action_refresh),
         pystray.MenuItem(t('menu.copy_status'), action_copy_status),
         pystray.MenuItem(t('menu.snooze_alerts'), action_snooze_alerts),

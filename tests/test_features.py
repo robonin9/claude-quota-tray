@@ -129,6 +129,25 @@ class WeeklySummaryTests(unittest.TestCase):
         self.assertEqual(out["threshold_hits"], 1)
         self.assertIsNotNone(out["busiest_hour"])
 
+    def test_period_window_excludes_older_than_days(self):
+        self._ins(20 * 86400, 90, 90)   # 20 days ago
+        self._ins(3600, 30, 40)         # within last day
+        # 7-day window sees only the recent row; 30-day window sees both.
+        self.assertEqual(history.period_summary(7, "acct")["samples"], 1)
+        self.assertEqual(history.period_summary(30, "acct")["samples"], 2)
+        self.assertEqual(history.period_summary(30, "acct")["peak_session"], 90)
+
+    def test_export_period_writes_file(self):
+        import os, tempfile
+        self._ins(3600, 30, 40)
+        self._ins(60, 85, 60)
+        p = os.path.join(tempfile.mkdtemp(), "m.md")
+        out = history.export_period_summary(p, "Acct", 30, "acct", threshold=80)
+        self.assertIsNotNone(out)
+        text = open(p, encoding="utf-8").read()
+        self.assertIn("30 days", text)        # range reflects the period
+        self.assertIn("85%", text)
+
 
 if __name__ == "__main__":
     unittest.main()
