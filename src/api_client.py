@@ -69,7 +69,6 @@ class UsageSnapshot:
     ok: bool
     error: Optional[str] = None
     fetched_at: float = 0.0
-<<<<<<< HEAD
     http_status: Optional[int] = None
 
     # Separate weekly Opus limit (Max plans). None when the account/plan does
@@ -78,9 +77,6 @@ class UsageSnapshot:
     opus_pct: Optional[int] = None
     opus_reset_seconds: Optional[int] = None
     opus_status: Optional[str] = None
-=======
-    status_code: Optional[int] = None  # HTTP status; None on network error
->>>>>>> upstream/main
 
     @property
     def has_data(self) -> bool:
@@ -267,15 +263,11 @@ def snapshot_from_headers(rh, resp=None) -> UsageSnapshot:
 
         ok=is_success or snapshot_has_headers(rh),
         fetched_at=time.time(),
-<<<<<<< HEAD
         http_status=status_code,
 
         opus_pct=(opus or {}).get("pct"),
         opus_reset_seconds=(opus or {}).get("reset"),
         opus_status=(opus or {}).get("status"),
-=======
-        status_code=resp.status_code,
->>>>>>> upstream/main
     )
 
     if resp is not None and not is_success and not snapshot.has_data:
