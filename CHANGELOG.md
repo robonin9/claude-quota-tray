@@ -42,7 +42,7 @@ Changes compared to upstream v0.2.0. Tray UI, polling, history, and notification
 
 ### Added
 
-- **History UI** — separate Session / Weekly chart panels, 24h / 7d range, CSV export, hover tooltips (`chart_widget.py`).
+- **History UI** — separate Session / Weekly chart panels, **24h / 7d / 30d (monthly)** range, CSV export, hover tooltips (`chart_widget.py`). Selecting the 30-day range bumps `history_retention_days` upward (never down) so the monthly chart fills over time instead of being pruned at the 7-day default.
 - **Desktop widget (Windows)** — always-on-top on-screen quota bar (`desktop_widget.py`).
 - **UX** — status popup → open history; last poll in tooltip; snooze alerts 1h; copy status; open error.log; notify on new release; tray metric (5h / weekly / max); separate alert thresholds per limit; poll backoff on errors; Tk light/dark via `ui_theme.py`.
 - **macOS (beta)** — `app_platform` / `platform_darwin`, unsigned `.app` CI artifact, `scripts/setup_mac.sh`.
