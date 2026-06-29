@@ -11,6 +11,15 @@ All notable changes to this fork are documented here.
 
 Changes compared to upstream v0.2.0. Tray UI, polling, history, and notifications are otherwise the same unless noted.
 
+### Accuracy (api_client.py, history.py)
+
+- **Quota parsing grounded in the real header format.** Verified against Anthropic docs and observed Claude Code/Max responses: `anthropic-ratelimit-unified-*-utilization` is a **fraction 0.0–1.0** (e.g. `0.0184` = ~2 %, `1` = 100 %), and `*-reset` is a **Unix epoch timestamp**. `_pct_from_utilization` now documents this, rounds half-up so tiny usage (`0.005` → 1 %) is not swallowed, and only falls back to "already a percentage" for values > 1. (Note: the previously suspected "`1` read as 100 %" is in fact *correct* for the real fractional format — `1` genuinely means full.)
+- **Robust reset parsing.** `_seconds_until_reset` now tries numeric epoch first (the real format) with a clear 2020-01-01 epoch/relative split, then RFC 3339 / ISO 8601, then relative seconds — instead of a `now/2` heuristic.
+- **Separate weekly Opus limit captured.** Unified windows are now discovered dynamically by scanning header names, so the Max-plan weekly **Opus** cap (`…-7d_oauth_opus-utilization`, or any future rename) is read and shown in the tooltip and tray menu instead of being silently dropped. New optional `opus_*` fields on `UsageSnapshot` (back-compatible).
+- **No hallucinated burn-rate ETAs.** `history.burn_rate` now ignores samples before the most recent quota reset (a drop in %), reports 0 (not negative) when flat/recovering, requires a minimum growth rate before projecting an ETA, and caps projections — so "time to full" no longer appears when usage is flat or a window just rolled over.
+- **`UsageSnapshot.http_status`** recorded for diagnostics; 4xx/5xx responses that still carry usable unified headers (e.g. a 429) remain `ok` and keep updating the badge.
+- **Tests:** new `tests/` suite (`test_api_client.py`, `test_history_burn.py`) covering `_pct_from_utilization`, `_seconds_until_reset`, header→snapshot mapping, and burn-rate edge cases. Run with `python -m unittest discover -s tests`.
+
 ### Added
 
 - **History UI** — separate Session / Weekly chart panels, 24h / 7d range, CSV export, hover tooltips (`chart_widget.py`).

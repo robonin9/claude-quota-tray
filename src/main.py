@@ -62,7 +62,7 @@ class AppState:
         self.burn: dict = {"session": {}, "weekly": {}}
         self.force_refresh = threading.Event()
         self.stop = threading.Event()
-        self.fired_thresholds = {"session": set(), "weekly": set()}
+        self.fired_thresholds = {"session": set(), "weekly": set(), "opus": set()}
         self.last_prune = 0.0
         self.active_account: Optional[dict] = None
         self.plan: Optional[str] = None
@@ -82,15 +82,13 @@ class AppState:
             return None
         s = self.snapshot.session_pct
         w = self.snapshot.weekly_pct
+        o = self.snapshot.opus_pct
         metric = user_settings.get("tray_icon_metric", "session")
         if metric == "weekly":
             return w if w is not None else s
         if metric == "max":
-            if s is None:
-                return w
-            if w is None:
-                return s
-            return max(s, w)
+            vals = [v for v in (s, w, o) if v is not None]
+            return max(vals) if vals else None
         return s if s is not None else w
 
     @property
@@ -370,6 +368,11 @@ def _build_tooltip() -> str:
             f"{t('bar.weekly_short')} {snap.weekly_pct}% "
             f"→ {format_reset(snap.weekly_reset_seconds)}"
         )
+    if snap.opus_pct is not None:
+        parts.append(
+            f"{t('bar.opus_short')} {snap.opus_pct}% "
+            f"→ {format_reset(snap.opus_reset_seconds)}"
+        )
 
     body = "\n".join(parts) if parts else t('status.no_headers')
     if state.last_poll_at > 0:
@@ -408,6 +411,7 @@ def _check_notifications(icon: pystray.Icon, snap: UsageSnapshot):
     pairs = [
         ("session", snap.session_pct, t('bar.session_short')),
         ("weekly", snap.weekly_pct, t('bar.weekly_short')),
+        ("opus", snap.opus_pct, t('bar.opus_short')),
     ]
     for key, pct, label in pairs:
         if pct is None:
@@ -749,6 +753,8 @@ def _current_data() -> dict:
         "weekly_pct": snap.weekly_pct if snap else None,
         "session_reset": snap.session_reset_seconds if snap else None,
         "weekly_reset": snap.weekly_reset_seconds if snap else None,
+        "opus_pct": snap.opus_pct if snap else None,
+        "opus_reset": snap.opus_reset_seconds if snap else None,
         "burn": state.burn,
         "plan": state.plan,
     }
@@ -767,7 +773,7 @@ def action_show_history(icon, item):
 
 def _on_settings_changed(icon: pystray.Icon):
     def _cb():
-        state.fired_thresholds = {"session": set(), "weekly": set()}
+        state.fired_thresholds = {"session": set(), "weekly": set(), "opus": set()}
         _load_active_token()
         state.force_refresh.set()
         _sync_desktop_widget(icon)
@@ -793,7 +799,7 @@ def action_edit_thresholds(icon, item):
 def _make_switch_account(account_id: str):
     def _do(icon, item):
         accounts.set_active(account_id)
-        state.fired_thresholds = {"session": set(), "weekly": set()}
+        state.fired_thresholds = {"session": set(), "weekly": set(), "opus": set()}
         _load_active_token()
         state.force_refresh.set()
         _refresh_icon(icon, update_menu=True)
@@ -807,7 +813,7 @@ def _make_set_threshold_preset(preset: list[int]):
             thresholds_session=preset,
             thresholds_weekly=preset,
         )
-        state.fired_thresholds = {"session": set(), "weekly": set()}
+        state.fired_thresholds = {"session": set(), "weekly": set(), "opus": set()}
         _refresh_icon(icon, update_menu=True)
     return _do
 
@@ -924,6 +930,12 @@ def build_menu():
             None,
             enabled=False,
             visible=lambda item: bool(_menu_weekly_text()),
+        ),
+        pystray.MenuItem(
+            lambda item: _menu_opus_text(),
+            None,
+            enabled=False,
+            visible=lambda item: bool(_menu_opus_text()),
         ),
         pystray.MenuItem(
             lambda item: _menu_burn_text(),
@@ -1186,6 +1198,17 @@ def _menu_weekly_text() -> str:
     return (
         f"{color_emoji(pct)} {t('bar.weekly_short')}  {unicode_bar(pct)}  {pct:>3}%  "
         f"· {t('bar.resets_in', time=format_reset(snap.weekly_reset_seconds))}"
+    )
+
+
+def _menu_opus_text() -> str:
+    snap = state.snapshot
+    if not snap or not snap.ok or snap.opus_pct is None:
+        return ""
+    pct = snap.opus_pct
+    return (
+        f"{color_emoji(pct)} {t('bar.opus_short')}  {unicode_bar(pct)}  {pct:>3}%  "
+        f"· {t('bar.resets_in', time=format_reset(snap.opus_reset_seconds))}"
     )
 
 

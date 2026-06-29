@@ -95,43 +95,66 @@ def recent(hours: float = 24, account_id: Optional[str] = None) -> list[tuple]:
         return []
 
 
+# Minimum growth (pct/hour) before we trust an ETA. Below this the value is
+# essentially flat and any projected "time to full" would be meaningless.
+_MIN_RATE_FOR_ETA = 0.5
+# Never project an ETA further out than this — beyond it the number is noise,
+# and the quota window will have reset long before then anyway.
+_MAX_ETA_SECONDS = 14 * 86400
+
+
 def burn_rate(window_minutes: float = 60, account_id: Optional[str] = None) -> dict:
     """
     Compute usage growth rate (% per hour) over the recent window for both
     session and weekly limits. Returns {session: {rate, eta_seconds}, weekly: ...}.
 
-    Rate is None if we lack at least two points or the value isn't growing.
+    Rate is None unless we have at least two points that are actually growing.
+    A quota reset (the percentage dropping) is detected and only the samples
+    *after* the most recent reset are used, so the rate isn't dragged negative
+    or the ETA hallucinated when a window rolls over mid-sample.
     """
     rows = recent(window_minutes / 60.0, account_id)
     if len(rows) < 2:
         return {"session": _empty_rate(), "weekly": _empty_rate()}
 
-    def _rate_for(idx_pct: int, current_pct: Optional[int]) -> dict:
-        # Find first non-null pct and last non-null pct in the window.
-        first = next(((r[0], r[idx_pct]) for r in rows if r[idx_pct] is not None), None)
-        last = next(
-            ((r[0], r[idx_pct]) for r in reversed(rows) if r[idx_pct] is not None),
-            None,
-        )
-        if not first or not last or first[0] == last[0]:
+    def _rate_for(idx_pct: int) -> dict:
+        # Non-null (ts, pct) points in chronological order.
+        points = [(r[0], r[idx_pct]) for r in rows if r[idx_pct] is not None]
+        if len(points) < 2:
             return _empty_rate()
-        dt_hours = (last[0] - first[0]) / 3600.0
+
+        # Drop everything up to and including the last reset (a drop in pct):
+        # only the current monotonic-ish run reflects the active window.
+        start = 0
+        for i in range(1, len(points)):
+            if points[i][1] < points[i - 1][1]:
+                start = i
+        segment = points[start:]
+        if len(segment) < 2:
+            return _empty_rate()
+
+        first_ts, first_pct = segment[0]
+        last_ts, current_pct = segment[-1]
+        dt_hours = (last_ts - first_ts) / 3600.0
         if dt_hours <= 0:
             return _empty_rate()
-        delta = last[1] - first[1]
-        rate = delta / dt_hours  # pct/hour
+
+        rate = (current_pct - first_pct) / dt_hours  # pct/hour
+        if rate <= 0:
+            # Flat or recovering — report no growth, no ETA.
+            return {"rate": max(0.0, rate), "eta_seconds": None}
+
         eta = None
-        if rate > 0.01 and current_pct is not None and current_pct < 100:
+        if rate >= _MIN_RATE_FOR_ETA and current_pct < 100:
             remaining = 100 - current_pct
-            eta = int((remaining / rate) * 3600)
+            projected = int((remaining / rate) * 3600)
+            if projected <= _MAX_ETA_SECONDS:
+                eta = projected
         return {"rate": rate, "eta_seconds": eta}
 
-    # current_pct from latest non-null
-    last_session = next((r[1] for r in reversed(rows) if r[1] is not None), None)
-    last_weekly = next((r[2] for r in reversed(rows) if r[2] is not None), None)
     return {
-        "session": _rate_for(1, last_session),
-        "weekly": _rate_for(2, last_weekly),
+        "session": _rate_for(1),
+        "weekly": _rate_for(2),
     }
 
 
