@@ -1,5 +1,9 @@
 # Claude Quota Tray
 
+<p align="center">
+  <img src="assets/hero.png" width="900" alt="Claude Quota Tray — real-time Claude usage in your Windows tray" />
+</p>
+
 ไอคอน system tray สำหรับ **Windows** ที่แสดงปริมาณการใช้งาน Claude (5-hour limit และ Weekly limit) ที่เหลืออยู่ — แค่เหลือบดูมุมจอก็รู้
 
 📘 **คู่มือภาษาไทยฉบับเต็ม (วิธีใช้ + คำแนะนำการตั้งค่า):** [README.th.md](README.th.md)

@@ -1,7 +1,7 @@
 # Claude Quota Tray — คู่มือภาษาไทย
 
 <p align="center">
-  <img src="assets/preview.png" width="900" alt="Claude Quota Tray" />
+  <img src="assets/hero.png" width="900" alt="Claude Quota Tray — ดูโควต้า Claude แบบเรียลไทม์บน Windows tray" />
 </p>
 
 แอปเล็กๆ บน **system tray** (มุมขวาล่างของ Windows) ที่บอกว่าโควต้า Claude ของคุณเหลือเท่าไหร่ — ทั้ง **5-hour (Session)** และ **Weekly** — โดยไม่ต้องเปิดเว็บหรือ Claude Desktop ทุกครั้ง
@@ -103,6 +103,10 @@
 
 **Settings → Icon style** — เลือกรูปแบบไอคอน (กรอบ / ทึบ / โดนัท / แถบ)  
 **Settings → Tray icon shows** — เลือกว่าจะแสดง % จาก Session, Weekly หรือค่าสูงสุดของทั้งสอง
+
+<p align="center">
+  <img src="assets/preview.png" width="760" alt="ไอคอน tray ปรับแต่งได้ 4 สไตล์ (กรอบ / ทึบ / โดนัท / แถบ)" />
+</p>
 
 <p align="center">
   <img src="assets/tray-menu.png" width="760" alt="เมนูคลิกขวา พร้อม progress bar ในเมนู" />
