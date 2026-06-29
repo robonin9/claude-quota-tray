@@ -100,10 +100,17 @@ class WeeklySummaryTests(unittest.TestCase):
         self._conn.commit()
         self._saved = history._conn
         history._conn = self._conn
+        # Pin language so summary text is deterministic regardless of the
+        # machine's saved language setting (export uses i18n.t()).
+        import i18n
+        self._i18n = i18n
+        self._lang0 = i18n.current_language
+        i18n.current_language = lambda: "en"
 
     def tearDown(self):
         history._conn = self._saved
         self._conn.close()
+        self._i18n.current_language = self._lang0
 
     def _ins(self, ago_s, s, w, o=None):
         self._conn.execute(

@@ -14,6 +14,7 @@ from typing import Callable, Optional
 
 import chart_widget
 import history
+import settings as user_settings
 from bar_widget import (
     apply_bar, build_bar, format_burn, refresh_color_constants, ui_font,
 )
@@ -119,11 +120,27 @@ def _run_window(account_id: str, account_name: str,
         plan_lbl.configure(text=("· " + plan) if plan else "")
         _redraw_charts()
 
+    def _ensure_retention_for(hrs: float):
+        # Longer views are only useful if history isn't pruned before it fills.
+        # Bump retention upward (never down) so future data accumulates.
+        try:
+            need_days = int(hrs / 24)
+            cur = int(user_settings.get("history_retention_days", 7))
+            if need_days > cur:
+                user_settings.update(history_retention_days=need_days + 1)
+        except Exception:
+            pass
+
     def _set_range(hrs: float):
         hours_var.set(hrs)
+        _ensure_retention_for(hrs)
         _redraw_charts()
 
-    for hrs, label_key in ((24, "window.range_24h"), (168, "window.range_7d")):
+    for hrs, label_key in (
+        (24, "window.range_24h"),
+        (168, "window.range_7d"),
+        (720, "window.range_30d"),
+    ):
         tk.Radiobutton(
             range_row, text=t(label_key), variable=hours_var, value=hrs,
             command=lambda h=hrs: _set_range(h),
