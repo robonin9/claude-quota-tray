@@ -660,14 +660,14 @@ def action_copy_status(icon, item):
         r.clipboard_append(text)
         r.update()
         r.destroy()
-        notifications.notify(icon, config.APP_NAME, t("common.save"))
+        notifications.notify(icon, config.APP_NAME, t("toast.status_copied"))
     except Exception as e:
         notifications.notify(icon, config.APP_NAME, str(e)[:120])
 
 
 def action_snooze_alerts(icon, item):
     user_settings.update(alert_snooze_until=time.time() + 3600)
-    notifications.notify(icon, config.APP_NAME, t("menu.snooze_alerts"))
+    notifications.notify(icon, config.APP_NAME, t("toast.alerts_snoozed"))
 
 
 def _sync_desktop_widget(icon: pystray.Icon) -> None:
@@ -802,6 +802,12 @@ def action_check_update(icon, item):
                 icon,
                 config.APP_NAME,
                 t("toast.update_up_to_date", version=result.latest.version),
+            )
+        elif result.no_releases:
+            notifications.notify(
+                icon,
+                config.APP_NAME,
+                t("toast.update_no_releases"),
             )
 
     threading.Thread(target=work, daemon=True).start()

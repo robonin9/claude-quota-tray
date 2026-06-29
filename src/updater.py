@@ -47,6 +47,9 @@ class UpdateCheckResult:
     latest: Optional[ReleaseInfo]
     update_available: bool
     error: Optional[str] = None
+    # True when the repo exists but has no published release yet (GitHub 404
+    # on releases/latest). This is a normal state, not an error.
+    no_releases: bool = False
 
 
 def parse_github_repo(spec: str) -> tuple[str, str]:
@@ -150,7 +153,23 @@ def check_for_update(repo_spec: str, current_version: str | None = None) -> Upda
             latest=latest,
             update_available=avail,
         )
-    except (HTTPError, URLError, ValueError, json.JSONDecodeError, KeyError) as e:
+    except HTTPError as e:
+        # 404 on releases/latest means the repo simply has no published
+        # release yet — treat as a benign "nothing to update to" state.
+        if e.code == 404:
+            return UpdateCheckResult(
+                current_version=current,
+                latest=None,
+                update_available=False,
+                no_releases=True,
+            )
+        return UpdateCheckResult(
+            current_version=current,
+            latest=None,
+            update_available=False,
+            error=str(e),
+        )
+    except (URLError, ValueError, json.JSONDecodeError, KeyError) as e:
         return UpdateCheckResult(
             current_version=current,
             latest=None,

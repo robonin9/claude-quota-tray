@@ -145,6 +145,8 @@ _T: dict[str, dict[str, str]] = {
         "toast.token_refreshing": "Token near expiry — refreshing…",
         "toast.reset_soon_title": "{app} — Quota almost back",
         "toast.reset_soon_body": "{label} ({pct}%) resets in {time} — you'll be able to use it again soon.",
+        "toast.status_copied": "Status copied to clipboard.",
+        "toast.alerts_snoozed": "Alerts snoozed for 1 hour.",
         "toast.summary_saved": "Usage summary saved: {path}",
         "toast.summary_empty": "Not enough history yet for a summary.",
         "toast.summary_retention": "History retention raised to {days} days so future monthly summaries are complete.",
@@ -170,6 +172,7 @@ _T: dict[str, dict[str, str]] = {
         "toast.update_error": "Update check failed: {msg}",
         "toast.update_available": "Update available: v{version}",
         "toast.update_up_to_date": "Up to date (v{version})",
+        "toast.update_no_releases": "No releases published yet on this repo.",
         "toast.update_applied": "Update: {msg}",
 
         "dialog.update_source_title": "Claude Quota — Update source",
@@ -383,6 +386,8 @@ _T: dict[str, dict[str, str]] = {
         "toast.token_refreshing": "Token ใกล้หมดอายุ — กำลังรีเฟรช…",
         "toast.reset_soon_title": "{app} — โควต้าใกล้กลับมาแล้ว",
         "toast.reset_soon_body": "{label} ({pct}%) จะรีเซ็ตในอีก {time} — อีกสักครู่จะใช้ได้อีกครั้ง",
+        "toast.status_copied": "คัดลอกสถานะไปยังคลิปบอร์ดแล้ว",
+        "toast.alerts_snoozed": "เลื่อนการแจ้งเตือนไป 1 ชั่วโมงแล้ว",
         "toast.summary_saved": "บันทึกสรุปการใช้งานแล้ว: {path}",
         "toast.summary_empty": "ข้อมูลยังไม่พอสำหรับทำสรุป",
         "toast.summary_retention": "ขยายการเก็บประวัติเป็น {days} วัน เพื่อให้สรุปรายเดือนครั้งต่อไปครบถ้วน",
@@ -408,6 +413,7 @@ _T: dict[str, dict[str, str]] = {
         "toast.update_error": "ตรวจสอบอัปเดตไม่สำเร็จ: {msg}",
         "toast.update_available": "มีเวอร์ชันใหม่: v{version}",
         "toast.update_up_to_date": "เป็นเวอร์ชันล่าสุดแล้ว (v{version})",
+        "toast.update_no_releases": "repo นี้ยังไม่มี release เผยแพร่",
         "toast.update_applied": "อัปเดต: {msg}",
 
         "dialog.update_source_title": "Claude Quota — แหล่งอัปเดต",
