@@ -90,20 +90,39 @@ def run(app: ModuleType) -> int:
 
 
 def _hung() -> None:
-    sys.stderr.write(f"self-test: no result after {TIMEOUT_SECONDS}s — hung\n")
-    sys.stderr.flush()
+    message = f"self-test: no result after {TIMEOUT_SECONDS}s — hung\n"
+    # A --windowed .exe has sys.stderr = None; write what we can, then exit.
+    for stream in (sys.stderr, sys.__stderr__):
+        if stream is not None:
+            try:
+                stream.write(message)
+                stream.flush()
+            except Exception:
+                pass
+            break
+    try:
+        import settings as user_settings
+        with open(user_settings.error_log_path(), "a", encoding="utf-8") as f:
+            f.write("\n=== self-test ===\n" + message)
+    except Exception:
+        pass
     os._exit(2)
 
 
 def _checks(app, ui_host, tk_inits, result) -> None:
     lines, problems = result["lines"], result["problems"]
 
-    def step(name, fn):
+    def step(name, fn, *, optional=False):
+        """``optional`` steps (the tray icon) only warn: some machines, such
+        as CI runners, have no notification area to put an icon in."""
         try:
             detail = fn()
             lines.append(f"[ OK ] {name}" + (f": {detail}" if detail else ""))
             return True
-        except Exception:
+        except Exception as e:
+            if optional:
+                lines.append(f"[WARN] {name}: {type(e).__name__}: {e}")
+                return False
             lines.append(f"[FAIL] {name}")
             problems.append(f"--- {name} ---\n{traceback.format_exc()}")
             return False
@@ -116,7 +135,7 @@ def _checks(app, ui_host, tk_inits, result) -> None:
         lines.append(f"python {sys.version.split()[0]} on {sys.platform}")
         step("fake usage data", lambda: _fake_state(app))
         icon_box: dict = {}
-        step("tray icon", lambda: _tray(app, ui_host, icon_box))
+        step("tray icon", lambda: _tray(app, ui_host, icon_box), optional=True)
         step("tray menu callables", lambda: _walk_menu(app.build_menu()))
         step("open windows", lambda: _open_windows(app))
         _settle(ui_host)
@@ -124,7 +143,7 @@ def _checks(app, ui_host, tk_inits, result) -> None:
         step("screenshot", _screenshot)
         step("single Tk root", lambda: _one_tk(tk_inits))
         step("close windows", lambda: _close_windows(ui_host))
-        step("stop tray icon", lambda: _stop_tray(icon_box))
+        step("stop tray icon", lambda: _stop_tray(icon_box), optional=True)
     except Exception:
         problems.append(traceback.format_exc())
     finally:
