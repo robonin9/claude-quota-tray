@@ -30,7 +30,7 @@ APP_ID = "ClaudeQuotaTray"
 # so we use the same value here to keep the process identity consistent —
 # otherwise the explicit AUMID set in main() and the toast AUMID disagree.
 WIN_APP_USER_MODEL_ID = APP_NAME
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.5.0"
 
 # GitHub Releases source for in-app / Update.bat upgrades (owner/repo or full URL).
 DEFAULT_UPDATE_REPO = os.environ.get(
