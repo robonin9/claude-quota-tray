@@ -57,13 +57,38 @@ def cmd_sums(version: str, out: Path, files: list[Path]) -> int:
 def _load_private_key():
     from Crypto.PublicKey import ECC
 
-    raw = os.environ.get("UPDATE_SIGNING_KEY", "").strip()
+    raw = os.environ.get("UPDATE_SIGNING_KEY", "").strip().lstrip("\ufeff").strip()
     if not raw:
         raise SystemExit("ERROR: UPDATE_SIGNING_KEY is not set (see docs/SIGNING.md)")
-    pem = raw if raw.startswith("-----BEGIN") else base64.b64decode(raw).decode("ascii")
-    key = ECC.import_key(pem)
+    # Diagnose common paste mistakes without ever printing the secret.
+    shape = f"(length {len(raw)}, first chars {raw[:5]!r})"
+    if re.fullmatch(r"[0-9a-fA-F]{64}", raw):
+        raise SystemExit(
+            "ERROR: UPDATE_SIGNING_KEY looks like the 64-hex PUBLIC key. "
+            "Paste the contents of update_signing_key.pem.b64 instead.")
+    if "PUBLIC KEY" in raw:
+        raise SystemExit("ERROR: UPDATE_SIGNING_KEY is a PUBLIC key PEM — use the private key.")
+    if raw.startswith("-----BEGIN"):
+        pem = raw
+    else:
+        compact = re.sub(r"\s+", "", raw)
+        try:
+            pem = base64.b64decode(compact, validate=True).decode("ascii")
+        except (ValueError, UnicodeDecodeError):
+            raise SystemExit(
+                f"ERROR: UPDATE_SIGNING_KEY is neither a PEM nor base64 of one {shape}. "
+                "Paste the whole contents of update_signing_key.pem.b64.")
+        if "BEGIN" not in pem:
+            raise SystemExit(
+                f"ERROR: UPDATE_SIGNING_KEY base64 does not decode to a PEM {shape}.")
+    try:
+        key = ECC.import_key(pem)
+    except (ValueError, IndexError, TypeError) as e:
+        raise SystemExit(f"ERROR: could not parse the signing key: {type(e).__name__} {shape}")
     if key.curve != "Ed25519":
         raise SystemExit(f"ERROR: UPDATE_SIGNING_KEY is a {key.curve} key, not Ed25519")
+    if not key.has_private():
+        raise SystemExit("ERROR: UPDATE_SIGNING_KEY has no private part — it is a public key.")
     return key
 
 
