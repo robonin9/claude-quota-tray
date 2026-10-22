@@ -1,6 +1,7 @@
 """Regression tests for the 2026-10 review fixes."""
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -47,8 +48,7 @@ class SettingsCorruptBackupTests(unittest.TestCase):
             d = Path(tmp)
             path = d / "settings.json"
             path.write_text("{not json", encoding="utf-8")
-            with mock.patch.object(s, "SETTINGS_DIR", d), \
-                 mock.patch.object(s, "SETTINGS_PATH", path), \
+            with mock.patch.dict(os.environ, {s.DATA_DIR_ENV: str(d)}), \
                  mock.patch.object(s, "_cache", None):
                 data = s.load()
                 self.assertTrue(data["accounts"])

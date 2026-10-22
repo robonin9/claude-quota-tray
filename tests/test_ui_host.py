@@ -4,14 +4,13 @@ The host is started with run_forever() on a thread the test owns, which is
 how a platform that needs Tk on the main thread would drive it.
 """
 
+import os
 import shutil
-import sys
 import tempfile
 import threading
 import time
 import tkinter
 import unittest
-from pathlib import Path
 
 import _path  # noqa: F401
 
@@ -37,13 +36,11 @@ def setUpModule():
         raise unittest.SkipTest("ui_host already started by another test")
     _tmp = tempfile.mkdtemp(prefix="cqt-test-")
     _saved.update(
-        dir=user_settings.SETTINGS_DIR, path=user_settings.SETTINGS_PATH,
-        cache=user_settings._cache, db=history.DB_PATH, conn=history._conn,
+        env=os.environ.get(user_settings.DATA_DIR_ENV),
+        cache=user_settings._cache, conn=history._conn,
     )
-    user_settings.SETTINGS_DIR = Path(_tmp)
-    user_settings.SETTINGS_PATH = Path(_tmp) / "settings.json"
+    os.environ[user_settings.DATA_DIR_ENV] = _tmp
     user_settings._cache = None
-    history.DB_PATH = Path(_tmp) / "history.db"
     history._conn = None
 
     tkinter.Tk.__init__ = _counting_init
@@ -64,10 +61,11 @@ def tearDownModule():
         _ui_thread.join(timeout=5)
     if history._conn is not None:
         history._conn.close()
-    user_settings.SETTINGS_DIR = _saved["dir"]
-    user_settings.SETTINGS_PATH = _saved["path"]
+    if _saved["env"] is None:
+        os.environ.pop(user_settings.DATA_DIR_ENV, None)
+    else:
+        os.environ[user_settings.DATA_DIR_ENV] = _saved["env"]
     user_settings._cache = _saved["cache"]
-    history.DB_PATH = _saved["db"]
     history._conn = _saved["conn"]
     shutil.rmtree(_tmp, ignore_errors=True)
 

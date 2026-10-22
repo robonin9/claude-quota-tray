@@ -1,5 +1,7 @@
 # Claude Quota Tray
 
+[![CI](https://github.com/robonin9/claude-quota-tray/actions/workflows/ci.yml/badge.svg)](https://github.com/robonin9/claude-quota-tray/actions/workflows/ci.yml)
+
 <p align="center">
   <img src="assets/hero.png" width="900" alt="Claude Quota Tray — real-time Claude usage in your Windows tray" />
 </p>
@@ -22,6 +24,8 @@
 
 **macOS 13+ (เบต้า)** — tray + poll + history จาก source (`scripts/setup_mac.sh`) หรือ `.app` unsigned จาก [Releases](../../releases) (อาจต้องคลิกขวา → Open ครั้งแรก) — ดู [docs/SIGNING.md](docs/SIGNING.md)
 > ข้อจำกัด: บน macOS ทั้ง Tk และ AppKit ต้องรันบน main thread ซึ่งตอนนี้ pystray ใช้อยู่ หน้าต่างต่างๆ (popup / history / dialog) บน Mac จึงยังเป็นเบต้าและอาจไม่เสถียร
+>
+> **มี Mac? ช่วยทดสอบได้:** รัน `python3 src/main.py --self-test` แล้วแนบผลที่พิมพ์ออกมา (และ `error.log` ถ้ามี) มาใน [issue](https://github.com/robonin9/claude-quota-tray/issues) — คำสั่งนี้ใช้ข้อมูลจำลองในโฟลเดอร์ชั่วคราว ไม่แตะ token หรือ settings จริง
 
 การ sign `.exe` บน Windows (optional): [docs/SIGNING.md](docs/SIGNING.md) — ต้องมี OV/EV `.pfx` ของ maintainer
 
@@ -96,6 +100,15 @@ python -m venv .venv
 pip install -r requirements.txt
 python src/main.py
 ```
+
+ตรวจว่าเครื่องรันแอปได้ (ใช้ได้ทั้ง Windows และ Mac):
+
+```bash
+python -m unittest discover -s tests   # unit tests
+python src/main.py --self-test         # เปิดทุกหน้าต่าง + ไอคอน tray ด้วยข้อมูลจำลอง แล้วปิดเอง
+```
+
+`--self-test` ใช้โฟลเดอร์ข้อมูลชั่วคราว (หรือโฟลเดอร์ที่ตั้งใน `CQT_DATA_DIR`) ไม่ยิง API และไม่อ่าน token — exit code `0` = ผ่าน, `1` = มีบางอย่างพัง, `2` = ค้างเกิน 30 วินาที ถ้าตั้ง `CQT_SELFTEST_SCREENSHOT=<โฟลเดอร์>` จะเก็บภาพหน้าจอไว้ด้วย CI (`.github/workflows/ci.yml`) รันทั้งสองคำสั่งนี้บน Windows และ macOS ทุกครั้งที่ push
 
 ## วิธี build เป็น .exe (Windows)
 
@@ -179,6 +192,7 @@ claude-quota-tray/
 │   ├── chart_widget.py     ← กราฟ history (area fill + hover tooltip)
 │   ├── ui_host.py          ← Tk root ตัวเดียว + เธรด UI กลาง (ทุกหน้าต่างเป็น Toplevel; เธรดอื่นส่งงานผ่าน call/call_sync)
 │   ├── tray_icon.py        ← pystray Icon ที่สร้างเมนูใหม่ทุกครั้งที่คลิกขวา (เมนูสดเสมอ)
+│   ├── self_test.py        ← `python src/main.py --self-test` (smoke test ด้วยข้อมูลจำลอง)
 │   ├── status_window.py    ← compact popup (left-click) + ปุ่ม open history
 │   ├── history_window.py   ← หน้าต่าง history: กราฟ Session/Weekly + toggle 24h/7d/30d + CSV
 │   ├── desktop_widget.py   ← แถบ quota ลอยบนจอ always-on-top (Windows)
