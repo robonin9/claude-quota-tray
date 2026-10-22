@@ -15,14 +15,18 @@ fork, so please always run the most recent version before reporting an issue.
 Claude Quota Tray is designed to touch your OAuth credentials as little as
 possible:
 
-- **Read-only.** The app only *reads* the Claude OAuth token that already
-  exists on your machine (Claude Desktop, Windows Credential Manager,
-  environment variables, or Claude Code credential files). It never writes,
-  rotates, or modifies your credentials.
-- **No token storage.** The token is held in memory only for the duration of a
-  request. It is **never** written to `settings.json`, `history.db`, or the
-  log. Settings store only a *path* or the `auto` discovery mode — never the
-  token value itself.
+- **Read-only for existing credentials.** The app only *reads* the Claude OAuth
+  token that already exists on your machine (Claude Desktop, Windows Credential
+  Manager, environment variables, or Claude Code credential files). It never
+  writes, rotates, or modifies those credentials.
+- **One app-owned token, kept in the OS secret store.** If you use *Connect
+  Claude account…*, the token you paste is stored under `ClaudeQuotaTray/oauth-token`
+  in Windows Credential Manager (DPAPI, per user) or the macOS login Keychain —
+  only on other systems in a `0600` file in the data folder. *Disconnect*
+  deletes it.
+- **Never in plain app files.** Tokens are **never** written to `settings.json`,
+  `history.db`, or the log. Settings store only a *path* or the `auto`
+  discovery mode.
 - **Single destination.** The token is sent only to `https://api.anthropic.com`
   over HTTPS, in a minimal request whose response body is ignored — the app
   reads usage from the `anthropic-ratelimit-unified-*` response headers only.
@@ -38,6 +42,53 @@ auth flow in `src/auth_discovery.py`, `src/token_reader.py`, and the request in
 `src/api_client.py`, or run `python src/token_reader.py --probe` to see exactly
 which source is used (the probe masks the token).
 
+## Signed updates
+
+*Install latest release…* in the tray menu, `Update claude quota tray.bat` and
+`python src/update_runner.py --apply` all go through the same verification in
+`src/updater.py`. A release is installed only if **every** check passes; if any
+fails, nothing is downloaded into, extracted to, or moved inside the install
+folder (a partly downloaded `.exe` is deleted).
+
+1. The release has `SHA256SUMS` and `SHA256SUMS.sig`. GitHub's auto-generated
+   source zipball is never used — it isn't covered by the signature.
+2. `SHA256SUMS.sig` is a valid **Ed25519** signature of `SHA256SUMS` by one of
+   the public keys in `src/update_keys.py`. An empty key list refuses every
+   update.
+3. The signed `version:` line equals the release tag, uses plain `X.Y.Z`
+   (no pre-release suffixes), and is **newer** than the installed version — a
+   signed but older release can't be pushed as "latest" to downgrade users.
+4. The downloaded file's SHA-256 matches its line in the signed file
+   (constant-time comparison).
+5. Downloads start at `https://github.com/<owner>/<repo>/releases/download/`
+   for the configured repo, and every redirect (GitHub serves assets from its
+   CDN) must stay on HTTPS.
+
+`release.yml` builds every asset first and publishes the release only once
+`SHA256SUMS` is signed, so a release never exists without its signature. The
+private key lives only in the `UPDATE_SIGNING_KEY` repository secret and the
+maintainer's offline backup — see [docs/SIGNING.md](docs/SIGNING.md).
+
+**What this protects against:** corrupted or truncated downloads, files
+modified in transit or replaced in the release, and forced downgrades to an
+older signed release.
+
+**What it does not protect against:** a leaked signing key (anyone with it can
+sign releases — report a suspected leak privately, see below); and a *freeze*,
+where someone hides newer releases so the app keeps the version it has (it
+will never move to an older one).
+
+## Known limitations
+
+- **Python dependencies are not hash-pinned.** Source-mode updates and
+  `Setup claude quota tray.bat` run `pip install -r requirements.txt`, which
+  fetches packages from PyPI without hash verification. The app's own files are
+  verified; its dependencies rely on PyPI and HTTPS. A future hardening step is
+  a hashed `requirements.lock` installed with `pip install --require-hashes`.
+- **Manual updates are not verified automatically.** If you replace files by
+  hand, compare them against the release's `SHA256SUMS` yourself (for example
+  `certutil -hashfile <file> SHA256` on Windows).
+
 ## Reporting a vulnerability
 
 If you believe you have found a security issue:
@@ -48,6 +99,10 @@ If you believe you have found a security issue:
    — but please do **not** include tokens, credentials, or other secrets in a
    public issue.
 
+If you suspect the **update-signing key** has leaked, always use the private
+advisory: the maintainer will ship a release that removes that key from
+`src/update_keys.py` and ask users to update manually.
+
 Please include the version, your OS, reproduction steps, and the impact you
 observed. As a hobby project, responses are best-effort: expect an initial reply
 within a couple of weeks. Accepted issues will be fixed in the next release and
@@ -55,10 +110,14 @@ credited (if you wish); out-of-scope reports will get a short explanation.
 
 ## Scope notes
 
-- Released `.exe` / `.app` builds are **unsigned** unless a maintainer signs
-  them — see [docs/SIGNING.md](docs/SIGNING.md). Antivirus/SmartScreen warnings
-  on an unsigned PyInstaller build are expected and are not themselves a
-  vulnerability. When in doubt, run from source.
+- **Two different signatures.** *Update signing* (Ed25519 over `SHA256SUMS`,
+  above) is **mandatory** and is what the app checks. *Code signing* of the
+  `.exe` with an OV/EV certificate (signtool) is **optional** and only affects
+  Windows SmartScreen. Released `.exe` / `.app` builds are not code-signed
+  unless a maintainer has a certificate — see [docs/SIGNING.md](docs/SIGNING.md).
+  Antivirus/SmartScreen warnings on a PyInstaller build without code signing
+  are expected and are not themselves a vulnerability. When in doubt, run from
+  source.
 - The app's security depends on the integrity of the machine it runs on. If the
   local credential stores it reads from are already compromised, this tool
   cannot protect them.

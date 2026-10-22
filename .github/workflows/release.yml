@@ -1,17 +1,55 @@
 name: Release
 
+# A real release is created only by pushing a vX.Y.Z tag. Running the
+# workflow by hand (workflow_dispatch) is a dry run: everything is built and
+# signed, and SHA256SUMS + .sig are uploaded as an artifact, but no release
+# is published.
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
-# Allow the workflow's GITHUB_TOKEN to create releases and upload assets.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag format and APP_VERSION
+        id: version
+        shell: bash
+        run: |
+          app_version=$(python3 -c "import sys; sys.path.insert(0, 'src'); import config; print(config.APP_VERSION)")
+          if ! [[ "$app_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::config.APP_VERSION '$app_version' must be X.Y.Z"
+            exit 1
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            tag="$GITHUB_REF_NAME"
+            # No pre-release tags: the updater only installs plain X.Y.Z.
+            if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Tag '$tag' must look like vX.Y.Z (no -rc / +build suffixes)"
+              exit 1
+            fi
+            if [ "${tag#v}" != "$app_version" ]; then
+              echo "::error::Tag $tag does not match config.APP_VERSION $app_version"
+              exit 1
+            fi
+          fi
+          echo "version=$app_version" >> "$GITHUB_OUTPUT"
+
   build-windows:
+    needs: guard
     runs-on: windows-latest
+    env:
+      # secrets can't be referenced in `if:` directly; expose a flag instead.
+      HAS_CERT: ${{ secrets.WINDOWS_CERT_PFX != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -30,28 +68,28 @@ jobs:
         run: .\build.bat
 
       - name: Sign executable (optional)
-        if: ${{ secrets.WINDOWS_CERT_PFX != '' }}
+        if: env.HAS_CERT == 'true'
         shell: pwsh
+        env:
+          CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
           $pfxPath = "$env:RUNNER_TEMP\cert.pfx"
-          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String("${{ secrets.WINDOWS_CERT_PFX }}"))
-          signtool sign /f $pfxPath /p "${{ secrets.WINDOWS_CERT_PASSWORD }}" /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 dist\ClaudeQuotaTray.exe
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:CERT_PFX))
+          signtool sign /f $pfxPath /p $env:CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 dist\ClaudeQuotaTray.exe
+          Remove-Item $pfxPath
 
+      # Must stay after "Sign executable": SHA256SUMS is computed from this
+      # artifact, so it has to be the exact (signed) file users download.
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ClaudeQuotaTray-windows
+          name: windows
           path: dist/ClaudeQuotaTray.exe
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/ClaudeQuotaTray.exe
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          if-no-files-found: error
 
   build-macos:
+    needs: guard
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -78,25 +116,21 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ClaudeQuotaTray-macos
+          name: macos
           path: dist/ClaudeQuotaTray-macos.zip
-
-      - name: Attach to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/ClaudeQuotaTray-macos.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          if-no-files-found: error
 
   package-source:
+    needs: guard
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.guard.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Build source bundle
         run: |
-          VERSION="${GITHUB_REF_NAME}"
-          OUT="claude-quota-tray-${VERSION}"
+          OUT="claude-quota-tray-v${VERSION}"
           mkdir -p "$OUT"
           cp -r src assets \
                 "Run claude quota tray.bat" \
@@ -107,9 +141,76 @@ jobs:
                 "$OUT/"
           zip -r "${OUT}.zip" "$OUT"
 
-      - name: Upload to release
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: source
+          path: claude-quota-tray-v*.zip
+          if-no-files-found: error
+
+  # The only job that publishes: it waits for every build, signs SHA256SUMS,
+  # and creates the release with all files at once — so there is never a
+  # window where a release exists without its signature.
+  release:
+    needs: [guard, build-windows, build-macos, package-source]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.guard.outputs.version }}
+      UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require the update signing key
+        run: |
+          if [ -z "$UPDATE_SIGNING_KEY" ]; then
+            echo "::error::Secret UPDATE_SIGNING_KEY is not set — see docs/SIGNING.md"
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pycryptodome
+        run: pip install "pycryptodome>=3.20.0"
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-files
+          merge-multiple: true
+
+      - name: Write and sign SHA256SUMS
+        run: |
+          cd release-files
+          python ../scripts/sign_release.py sums --version "$VERSION" --out SHA256SUMS \
+            ClaudeQuotaTray.exe ClaudeQuotaTray-macos.zip "claude-quota-tray-v${VERSION}.zip"
+          python ../scripts/sign_release.py sign --sums SHA256SUMS --out SHA256SUMS.sig
+          # Fails if the secret's key isn't the one committed in src/update_keys.py.
+          python ../scripts/sign_release.py verify --sums SHA256SUMS --sig SHA256SUMS.sig
+          ls -l
+
+      - name: Upload dry-run output
+        if: github.event_name != 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dry-run-release
+          path: release-files/
+
+      - name: Create GitHub Release (all files at once)
+        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
-          files: claude-quota-tray-*.zip
+          files: |
+            release-files/ClaudeQuotaTray.exe
+            release-files/ClaudeQuotaTray-macos.zip
+            release-files/claude-quota-tray-v${{ env.VERSION }}.zip
+            release-files/SHA256SUMS
+            release-files/SHA256SUMS.sig
+          fail_on_unmatched_files: true
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

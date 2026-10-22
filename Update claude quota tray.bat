@@ -82,9 +82,10 @@ if not exist "%UPDATE_RUNNER%" (
 "%VENV_PY%" "%UPDATE_RUNNER%" --apply
 if errorlevel 1 (
     echo.
-    echo   [ERROR] GitHub update failed.
-    echo   Check internet, repo name in tray menu - Install/update - Update source,
-    echo   or publish a release on GitHub with a source .zip asset.
+    echo   [ERROR] GitHub update failed - nothing was changed.
+    echo   Check internet and the repo name in tray menu - Install/update - Update source.
+    echo   Releases must include signed SHA256SUMS and SHA256SUMS.sig files; unsigned,
+    echo   tampered, pre-release or older releases are refused. See docs\SIGNING.md.
     pause
     exit /b 1
 )
