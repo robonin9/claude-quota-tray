@@ -52,6 +52,11 @@ class SignedUpdateTests(unittest.TestCase):
         self._keys = mock.patch.object(update_keys, "UPDATE_PUBLIC_KEYS", [self.public_hex])
         self._keys.start()
         self.addCleanup(self._keys.stop)
+        # Fixture releases are v0.4.0; pin the "installed" version so these
+        # tests don't depend on the real APP_VERSION.
+        self._ver = mock.patch.object(updater.config, "APP_VERSION", "0.3.0")
+        self._ver.start()
+        self.addCleanup(self._ver.stop)
         self.tmp = Path(tempfile.mkdtemp(prefix="cqt-upd-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.project = self.tmp / "install"

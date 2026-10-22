@@ -7,9 +7,11 @@ All notable changes to this fork are documented here.
 
 ---
 
-## [Unreleased] — fork (robonin9)
+## [Unreleased]
 
-Changes compared to upstream v0.2.0. Tray UI, polling, history, and notifications are otherwise the same unless noted.
+## [0.4.0] — 2026-10-23 — fork (robonin9)
+
+First release signed for in-app updates (see *Security: signed updates* below and `docs/SIGNING.md`). Changes compared to upstream v0.2.0. Tray UI, polling, history, and notifications are otherwise the same unless noted.
 
 ### Security: signed updates (2026-10) — breaking for releases
 
