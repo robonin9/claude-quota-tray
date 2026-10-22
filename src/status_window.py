@@ -7,13 +7,13 @@ Auto-refreshes every 5 seconds while open.
 
 from __future__ import annotations
 
-import threading
 import time
 import tkinter as tk
 import traceback
 from pathlib import Path
 from typing import Callable, Optional
 
+import ui_host
 from bar_widget import (
     BG, BTN_BG, BTN_BG_ACTIVE, MUTED, TEXT,
     apply_bar, build_bar, format_burn, refresh_color_constants, ui_font,
@@ -22,9 +22,8 @@ from i18n import t
 from ui_theme import colors
 
 
-_window_lock = threading.Lock()
-_open_window: Optional[tk.Tk] = None
-_spawn_result: dict = {"ok": False}
+# Only touched on the UI thread.
+_open_window: Optional[tk.Toplevel] = None
 
 SnapshotFetcher = Callable[[], dict]
 
@@ -46,48 +45,46 @@ def show(account_name: str, get_data: SnapshotFetcher,
          on_open_history: Optional[Callable[[], None]] = None) -> bool:
     """
     Open (or focus) the compact status popup.
-    Returns True if the spawn succeeded (Tk initialised), False on failure
-    so the caller can fall back to another window.
+    Returns True if the window is up, False on failure so the caller can
+    fall back to another window.
     """
-    global _open_window
-    with _window_lock:
-        if _open_window is not None:
-            try:
-                _open_window.after(0, lambda w=_open_window: _bring_to_front(w))
-                return True
-            except tk.TclError:
-                _open_window = None
-
-    _spawn_result["ok"] = False
-    ready = threading.Event()
-    threading.Thread(
-        target=_run, args=(account_name, get_data, ready, on_open_history),
-        daemon=True,
-    ).start()
-    # Give the worker a brief window to init Tk; if it failed quickly we
-    # learn here and can fall back.
-    ready.wait(timeout=2.0)
-    return bool(_spawn_result["ok"])
+    try:
+        return bool(ui_host.call_sync(
+            _open_or_focus, account_name, get_data, on_open_history,
+            timeout=3.0,
+        ))
+    except Exception:
+        _log_error("show")
+        return False
 
 
-def _bring_to_front(win: tk.Tk) -> None:
+def _bring_to_front(win: tk.Toplevel) -> None:
     try:
         win.deiconify()
         win.lift()
         win.focus_force()
         win.attributes("-topmost", True)
-        win.after(300, lambda: _safe_set_topmost(win, False))
+        ui_host.after(300, lambda: _safe_set_topmost(win, False))
     except tk.TclError:
         pass
 
 
-def _run(account_name: str, get_data: SnapshotFetcher,
-         ready: threading.Event,
-         on_open_history: Optional[Callable[[], None]] = None) -> None:
+def _forget(win: tk.Toplevel) -> None:
     global _open_window
-    root: Optional[tk.Tk] = None
+    if _open_window is win:
+        _open_window = None
+
+
+def _open_or_focus(account_name: str, get_data: SnapshotFetcher,
+                   on_open_history: Optional[Callable[[], None]] = None) -> bool:
+    global _open_window
+    if _open_window is not None and _open_window.winfo_exists():
+        _bring_to_front(_open_window)
+        return True
+    _open_window = None
+    root: Optional[tk.Toplevel] = None
     try:
-        root = tk.Tk()
+        root = tk.Toplevel(ui_host.root())
         root.title(t('window.status_title', name=account_name))
         root.configure(bg=BG)
         root.minsize(360, 240)
@@ -104,34 +101,25 @@ def _run(account_name: str, get_data: SnapshotFetcher,
 
         try:
             root.attributes("-topmost", True)
-            root.after(400, lambda: _safe_set_topmost(root, False))
+            ui_host.after(400, lambda: _safe_set_topmost(root, False))
         except tk.TclError:
             pass
 
-        with _window_lock:
-            _open_window = root
-
         _build_widgets(root, account_name, get_data, on_open_history=on_open_history)
-
-        _spawn_result["ok"] = True
-        ready.set()
-        root.mainloop()
+        _open_window = root
+        ui_host.on_destroy(root, lambda: _forget(root))
+        return True
     except Exception:
         _log_error("init")
-        _spawn_result["ok"] = False
-        ready.set()
         try:
             if root is not None:
                 root.destroy()
         except Exception:
             pass
-    finally:
-        with _window_lock:
-            if _open_window is root:
-                _open_window = None
+        return False
 
 
-def _build_widgets(root: tk.Tk, account_name: str,
+def _build_widgets(root: tk.Toplevel, account_name: str,
                    get_data: SnapshotFetcher,
                    on_open_history: Optional[Callable[[], None]] = None) -> None:
     refresh_color_constants()
@@ -226,16 +214,22 @@ def _build_widgets(root: tk.Tk, account_name: str,
     if on_open_history:
         _btn(t("menu.open_history"), on_open_history, padx=(0, 8))
 
-    root.after(50, _refresh)
+    def _refresh_if_open():
+        if root.winfo_exists():
+            _refresh()
+
+    ui_host.after(50, _refresh_if_open)
 
     def _auto():
+        if not root.winfo_exists():
+            return
         try:
             _refresh()
-            root.after(5_000, _auto)
         except tk.TclError:
             return
+        ui_host.after(5_000, _auto)
 
-    root.after(5_000, _auto)
+    ui_host.after(5_000, _auto)
 
     def on_close():
         try:

@@ -34,6 +34,8 @@ import history_window
 import status_window
 import settings_dialogs
 import desktop_widget
+import ui_host
+from tray_icon import TrayIcon
 from i18n import LANGUAGES, set_language, t
 from bar_widget import color_emoji, refresh_color_constants, unicode_bar
 from api_client import fetch_usage, format_reset, UsageSnapshot
@@ -81,6 +83,8 @@ class AppState:
         self.last_poll_at: float = 0.0
         self.poll_fail_streak: int = 0
         self.update_check_done: bool = False
+        # Set by dialogs (UI thread); the poll thread does the actual reload.
+        self.reload_token: bool = False
 
     @property
     def headline_pct(self) -> Optional[int]:
@@ -245,7 +249,7 @@ def poll_loop(icon: pystray.Icon):
 
 def _poll_loop_inner(icon: pystray.Icon):
     _load_active_token()
-    _refresh_icon(icon)
+    _apply_tray_update(icon)
     if state.token_error and state.token is None:
         _maybe_show_setup_notice(icon)
         # Without a token, sit idle but keep checking — user can configure
@@ -253,8 +257,9 @@ def _poll_loop_inner(icon: pystray.Icon):
         while not state.stop.is_set():
             state.force_refresh.clear()
             state.force_refresh.wait(timeout=30)
+            state.reload_token = False
             _load_active_token()
-            _refresh_icon(icon)
+            _apply_tray_update(icon)
             if state.token:
                 break
         if state.stop.is_set():
@@ -263,9 +268,13 @@ def _poll_loop_inner(icon: pystray.Icon):
     time.sleep(config.INITIAL_DELAY_SECONDS)
 
     while not state.stop.is_set():
+        if state.reload_token:
+            state.reload_token = False
+            _load_active_token()
+            _apply_tray_update(icon)
         if not _within_schedule():
             state.paused_by_schedule = True
-            _refresh_icon(icon)
+            _apply_tray_update(icon)
         else:
             state.paused_by_schedule = False
 
@@ -327,7 +336,7 @@ def _poll_loop_inner(icon: pystray.Icon):
                 except Exception:
                     _log_action_error("poll_iteration")
                     state.poll_fail_streak = min(state.poll_fail_streak + 1, 8)
-            _refresh_icon(icon)
+            _apply_tray_update(icon)
             if not state.update_check_done:
                 state.update_check_done = True
                 _maybe_notify_update(icon)
@@ -352,13 +361,15 @@ def _maybe_prune():
     history.prune(retention)
 
 
-def _refresh_icon(icon: pystray.Icon, *, update_menu: bool = False) -> None:
-    """Refresh tray visuals.
+def _apply_tray_update(icon: pystray.Icon, *, update_menu: bool = False) -> None:
+    """The one place that changes the tray icon image, tooltip, and menu.
 
     On Windows, icon.menu / update_menu() must not run from the poll thread —
     that race crashes the Win32 message loop and the tray icon vanishes.
     The poller only updates the badge image + tooltip; menu rebuilds happen
-    from menu callbacks (main/message thread) or when update_menu=True.
+    from menu callbacks (pystray thread) or when update_menu=True. The native
+    menu is also rebuilt on every right-click (tray_icon.TrayIcon), so other
+    threads never need update_menu=True.
     """
     refresh_color_constants()
     try:
@@ -366,11 +377,11 @@ def _refresh_icon(icon: pystray.Icon, *, update_menu: bool = False) -> None:
                                 theme=_current_theme(),
                                 style=_current_icon_style())
     except Exception:
-        _log_action_error("_refresh_icon:icon")
+        _log_action_error("_apply_tray_update:icon")
     try:
         icon.title = _build_tooltip()[:_TOOLTIP_MAX]
     except Exception:
-        _log_action_error("_refresh_icon:title")
+        _log_action_error("_apply_tray_update:title")
     try:
         desktop_widget.refresh(_current_data)
     except Exception:
@@ -380,7 +391,7 @@ def _refresh_icon(icon: pystray.Icon, *, update_menu: bool = False) -> None:
             icon.menu = build_menu()
             icon.update_menu()
         except Exception:
-            _log_action_error("_refresh_icon:menu")
+            _log_action_error("_apply_tray_update:menu")
 
 
 # Win32 tray tooltip (NOTIFYICONDATAW.szTip) is capped at 128 wide chars
@@ -579,7 +590,7 @@ def _compute_auto_interval() -> int:
 
 def action_refresh(icon, item):
     state.force_refresh.set()
-    _refresh_icon(icon, update_menu=True)
+    _apply_tray_update(icon, update_menu=True)
 
 
 def _log_action_error(where: str) -> None:
@@ -676,14 +687,15 @@ def action_open_error_log(icon, item):
 
 def action_copy_status(icon, item):
     text = _build_tooltip().replace("\n", " | ")
-    try:
-        import tkinter as tk
-        r = tk.Tk()
-        r.withdraw()
+
+    def _copy():
+        r = ui_host.root()
         r.clipboard_clear()
         r.clipboard_append(text)
         r.update()
-        r.destroy()
+
+    try:
+        ui_host.call_sync(_copy)
         notifications.notify(icon, config.APP_NAME, t("toast.status_copied"))
     except Exception as e:
         notifications.notify(icon, config.APP_NAME, str(e)[:120])
@@ -707,12 +719,12 @@ def action_toggle_desktop_widget(icon, item):
     dw["enabled"] = not bool(dw.get("enabled"))
     user_settings.update(desktop_widget=dw)
     _sync_desktop_widget(icon)
-    _refresh_icon(icon, update_menu=True)
+    _apply_tray_update(icon, update_menu=True)
 
 
 def action_toggle_notify_on_update(icon, item):
     user_settings.update(notify_on_update=not bool(user_settings.get("notify_on_update", True)))
-    _refresh_icon(icon, update_menu=True)
+    _apply_tray_update(icon, update_menu=True)
 
 
 def _maybe_notify_update(icon: pystray.Icon) -> None:
@@ -737,6 +749,7 @@ def _maybe_notify_update(icon: pystray.Icon) -> None:
 
 def action_quit(icon, item):
     desktop_widget.hide()
+    ui_host.shutdown()
     state.stop.set()
     state.force_refresh.set()
     icon.stop()
@@ -1021,16 +1034,15 @@ def action_export_monthly_summary(icon, item):
 
 
 def _on_settings_changed(icon: pystray.Icon):
+    # Runs on the UI thread (dialog save buttons), so it must not touch
+    # pystray: the poll thread reloads the token and repaints the icon, and
+    # the menu is rebuilt from live values the next time it opens.
     def _cb():
         state.fired_thresholds = {"session": set(), "weekly": set(), "opus": set()}
         state.bad_tokens.clear()
-        _load_active_token()
+        state.reload_token = True
         state.force_refresh.set()
         _sync_desktop_widget(icon)
-        try:
-            _refresh_icon(icon, update_menu=True)
-        except Exception:
-            pass
     return _cb
 
 
@@ -1057,7 +1069,7 @@ def _make_switch_account(account_id: str):
         state.bad_tokens.clear()
         _load_active_token()
         state.force_refresh.set()
-        _refresh_icon(icon, update_menu=True)
+        _apply_tray_update(icon, update_menu=True)
     return _do
 
 
@@ -1069,14 +1081,14 @@ def _make_set_threshold_preset(preset: list[int]):
             thresholds_weekly=preset,
         )
         state.fired_thresholds = {"session": set(), "weekly": set(), "opus": set()}
-        _refresh_icon(icon, update_menu=True)
+        _apply_tray_update(icon, update_menu=True)
     return _do
 
 
 def _make_set_tray_metric(value: str):
     def _do(icon, item):
         user_settings.update(tray_icon_metric=value)
-        _refresh_icon(icon, update_menu=True)
+        _apply_tray_update(icon, update_menu=True)
     return _do
 
 
@@ -1084,14 +1096,14 @@ def _make_set_theme(value: str):
     def _do(icon, item):
         user_settings.update(theme=value)
         refresh_color_constants()
-        _refresh_icon(icon, update_menu=True)
+        _apply_tray_update(icon, update_menu=True)
     return _do
 
 
 def _make_set_icon_style(value: str):
     def _do(icon, item):
         user_settings.update(icon_style=value)
-        _refresh_icon(icon, update_menu=True)
+        _apply_tray_update(icon, update_menu=True)
     return _do
 
 
@@ -1099,7 +1111,7 @@ def _make_set_interval(seconds: int):
     def _do(icon, item):
         user_settings.update(poll_interval_seconds=seconds)
         state.force_refresh.set()
-        _refresh_icon(icon, update_menu=True)
+        _apply_tray_update(icon, update_menu=True)
     return _do
 
 
@@ -1130,6 +1142,7 @@ def _restart_app(icon) -> None:
     # Brief delay so the replacement instance has time to come up before
     # we remove our tray icon — avoids a visible gap.
     time.sleep(0.6)
+    ui_host.shutdown()
     state.stop.set()
     state.force_refresh.set()
     try:
@@ -1159,7 +1172,7 @@ def _make_set_language(code: str):
 def action_toggle_sound(icon, item):
     cur = bool(user_settings.get("sound_alerts", True))
     user_settings.update(sound_alerts=not cur)
-    _refresh_icon(icon, update_menu=True)
+    _apply_tray_update(icon, update_menu=True)
 
 
 def action_toggle_schedule(icon, item):
@@ -1167,7 +1180,7 @@ def action_toggle_schedule(icon, item):
     sched["enabled"] = not bool(sched.get("enabled"))
     user_settings.update(schedule=sched)
     state.force_refresh.set()
-    _refresh_icon(icon, update_menu=True)
+    _apply_tray_update(icon, update_menu=True)
 
 
 # --- Menu construction ----------------------------------------------------
@@ -1242,22 +1255,32 @@ def build_menu():
     )
 
 
-def _build_account_menu():
-    items = []
+def _active_account_id() -> Optional[str]:
     active = state.active_account
-    active_id = active["id"] if active else None
+    return active["id"] if active else None
+
+
+def _account_menu_items():
+    # A single callable makes this a dynamic pystray.Menu: the account list is
+    # re-read every time the native menu is rebuilt, so accounts added or
+    # removed in the dialog show up without rebuilding the descriptor.
+    items = []
     for acct in accounts.list_accounts():
         items.append(pystray.MenuItem(
             acct.get("name", "Account"),
             _make_switch_account(acct["id"]),
-            checked=lambda item, aid=acct["id"]: aid == active_id,
+            checked=lambda item, aid=acct["id"]: aid == _active_account_id(),
             radio=True,
         ))
     if items:
         items.append(pystray.Menu.SEPARATOR)
     items.append(pystray.MenuItem(t('menu.connect_claude'), action_connect_claude))
     items.append(pystray.MenuItem(t('menu.manage_accounts'), action_manage_accounts))
-    return pystray.Menu(*items)
+    return items
+
+
+def _build_account_menu():
+    return pystray.Menu(_account_menu_items)
 
 
 def _build_maintenance_menu():
@@ -1289,7 +1312,9 @@ def _build_maintenance_menu():
 
 
 def _build_settings_menu():
-    cur_thresholds = _thresholds()
+    # Every checked/text value below is read live: the native menu is rebuilt
+    # from these callables each time it opens (see tray_icon.TrayIcon), and
+    # dialogs change settings without rebuilding the menu descriptor.
     presets = [
         (t('menu.thresholds_quiet'), [95]),
         (t('menu.thresholds_default'), [80, 95]),
@@ -1299,18 +1324,17 @@ def _build_settings_menu():
         pystray.MenuItem(
             label,
             _make_set_threshold_preset(values),
-            checked=lambda item, v=values: list(v) == cur_thresholds,
+            checked=lambda item, v=values: list(v) == _thresholds(),
             radio=True,
         )
         for label, values in presets
     ]
 
-    cur_theme = user_settings.get("theme", "auto")
     theme_items = [
         pystray.MenuItem(
             label,
             _make_set_theme(value),
-            checked=lambda item, v=value: v == cur_theme,
+            checked=lambda item, v=value: v == user_settings.get("theme", "auto"),
             radio=True,
         )
         for label, value in (
@@ -1320,12 +1344,11 @@ def _build_settings_menu():
         )
     ]
 
-    cur_style = _current_icon_style()
     style_items = [
         pystray.MenuItem(
             label,
             _make_set_icon_style(value),
-            checked=lambda item, v=value: v == cur_style,
+            checked=lambda item, v=value: v == _current_icon_style(),
             radio=True,
         )
         for label, value in (
@@ -1336,12 +1359,12 @@ def _build_settings_menu():
         )
     ]
 
-    cur_interval = int(user_settings.get("poll_interval_seconds", 60))
     interval_items = [
         pystray.MenuItem(
             label,
             _make_set_interval(seconds),
-            checked=lambda item, s=seconds: s == cur_interval,
+            checked=lambda item, s=seconds:
+                s == int(user_settings.get("poll_interval_seconds", 60)),
             radio=True,
         )
         for label, seconds in (
@@ -1365,23 +1388,24 @@ def _build_settings_menu():
         for code, label in LANGUAGES.items()
     ]
 
-    sched = user_settings.get("schedule", {}) or {}
-    sched_label = t(
-        'menu.pause_outside',
-        start=int(sched.get('start_hour', 9)),
-        end=int(sched.get('end_hour', 18)),
-    )
+    def _sched_label(_item) -> str:
+        sched = user_settings.get("schedule", {}) or {}
+        return t(
+            'menu.pause_outside',
+            start=int(sched.get('start_hour', 9)),
+            end=int(sched.get('end_hour', 18)),
+        )
 
     threshold_items.append(pystray.Menu.SEPARATOR)
     threshold_items.append(pystray.MenuItem(t('menu.thresholds_custom'),
                                             action_edit_thresholds))
 
-    cur_metric = user_settings.get("tray_icon_metric", "session")
     metric_items = [
         pystray.MenuItem(
             label,
             _make_set_tray_metric(value),
-            checked=lambda item, v=value: v == cur_metric,
+            checked=lambda item, v=value:
+                v == user_settings.get("tray_icon_metric", "session"),
             radio=True,
         )
         for label, value in (
@@ -1391,7 +1415,8 @@ def _build_settings_menu():
         )
     ]
 
-    dw_enabled = bool((user_settings.get("desktop_widget") or {}).get("enabled"))
+    def _dw_enabled(_item) -> bool:
+        return bool((user_settings.get("desktop_widget") or {}).get("enabled"))
 
     return pystray.Menu(
         pystray.MenuItem(t('menu.alert_thresholds'),
@@ -1411,10 +1436,10 @@ def _build_settings_menu():
             t("menu.desktop_widget_enable"),
             action_toggle_desktop_widget,
             visible=lambda item: desktop_widget.is_supported(),
-            checked=lambda item: dw_enabled,
+            checked=_dw_enabled,
         ),
         pystray.MenuItem(
-            sched_label,
+            _sched_label,
             action_toggle_schedule,
             checked=lambda item: bool(
                 (user_settings.get("schedule", {}) or {}).get("enabled")
@@ -1550,7 +1575,7 @@ def _start_poller(icon: pystray.Icon) -> None:
     _icon_proxy.bind(icon)
     _sync_desktop_widget(_icon_proxy)
     if _poller_started.is_set():
-        _refresh_icon(_icon_proxy)
+        _apply_tray_update(_icon_proxy)
         return
     _poller_started.set()
     threading.Thread(target=poll_loop, args=(_icon_proxy,), daemon=True).start()
@@ -1593,9 +1618,11 @@ def main():
     try:
         user_settings.load()
         notifications.init(config.APP_NAME)
+        if not ui_host.start():
+            sys.stderr.write("=== Tk unavailable; windows will not open ===\n")
 
         while not state.stop.is_set():
-            icon = pystray.Icon(
+            icon = TrayIcon(
                 config.APP_ID,
                 icon=render_icon(None, theme=_current_theme(),
                                  style=_current_icon_style()),
