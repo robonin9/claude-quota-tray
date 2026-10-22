@@ -70,8 +70,8 @@ _T: dict[str, dict[str, str]] = {
         "toast.error_title": "{app} error",
         "toast.setup_title": "{app} — Sign in required",
         "toast.setup_body": (
-            "No login found. Sign in to Claude Desktop, or install Claude Code "
-            "and run 'claude auth login'. You can also set Account → Manage accounts."
+            "No Claude login found. Right-click the tray icon → "
+            "Connect Claude account… to sign in."
         ),
 
         # Menu
@@ -121,6 +121,7 @@ _T: dict[str, dict[str, str]] = {
         "menu.monthly_summary": "Export monthly summary…",
         "menu.language": "Language",
         "menu.open_console": "Open Anthropic Console",
+        "menu.claude_usage": "Claude.ai usage (Pro/Max)",
         "menu.console_usage": "Usage dashboard",
         "menu.console_limits": "Rate limits",
         "menu.maintenance": "Install / update",
@@ -141,7 +142,7 @@ _T: dict[str, dict[str, str]] = {
         "toast.reauth_ok": "Token refreshed successfully.",
         "toast.reauth_failed": "Token still invalid. Open Claude Desktop, sign in, then click Refresh.",
         "toast.auth_expired_title": "{app} — Session expired",
-        "toast.auth_expired_body": "Claude Desktop token expired. Will retry in 30 s. Or right-click → Re-authenticate.",
+        "toast.auth_expired_body": "Claude token was rejected (expired or signed out). Retrying in 30 s — or right-click → Connect Claude account….",
         "toast.token_refreshing": "Token near expiry — refreshing…",
         "toast.reset_soon_title": "{app} — Quota almost back",
         "toast.reset_soon_body": "{label} ({pct}%) resets in {time} — you'll be able to use it again soon.",
@@ -214,6 +215,27 @@ _T: dict[str, dict[str, str]] = {
         "plan.unknown": "Unknown",
 
         # Accounts dialog
+        "menu.connect_claude": "Connect Claude account…",
+        "connect.title": "Claude Quota — Connect Claude account",
+        "connect.heading": "Connect your Claude account",
+        "connect.step1": "1. Click the button below — a window opens and runs 'claude setup-token', then your browser asks you to log in to Claude.",
+        "connect.step2": "2. When the window shows a long token starting with sk-ant-oat01-, select it and copy (Ctrl+C).",
+        "connect.step3": "3. This dialog picks it up automatically — just click Save. The token is stored in Windows Credential Manager, not in a file.",
+        "connect.open_login": "Open Claude login",
+        "connect.install_cli": "Install Claude Code first…",
+        "connect.no_cli": "Claude Code CLI ('claude') was not found. Install it, or paste a token you already have below.",
+        "connect.waiting": "Waiting for you to copy the token…",
+        "connect.paste_label": "Token (auto-filled from the clipboard, or paste it here):",
+        "connect.found": "Token found in the clipboard ✓ — click Save.",
+        "connect.verifying": "Checking the token with Claude…",
+        "connect.saved": "Connected ✓ — usage will appear in the tray shortly.",
+        "connect.invalid": "That doesn't look like a Claude token (it should start with sk-ant-oat01-).",
+        "connect.rejected": "Claude rejected this token (401). Run setup-token again and copy the new one.",
+        "connect.verify_failed": "Could not verify the token: {msg}",
+        "connect.save_failed": "Could not store the token: {msg}",
+        "connect.launch_failed": "Could not open the login window: {msg}",
+        "connect.disconnect": "Remove saved token",
+        "connect.removed": "Saved token removed.",
         "dialog.accounts_title": "Claude Quota — Accounts",
         "dialog.accounts_heading": "Configured accounts",
         "dialog.accounts_desc": (
@@ -311,9 +333,8 @@ _T: dict[str, dict[str, str]] = {
         "toast.error_title": "{app} ผิดพลาด",
         "toast.setup_title": "{app} — ต้องเข้าสู่ระบบก่อน",
         "toast.setup_body": (
-            "ไม่พบการ login — กรุณาเข้าสู่ระบบใน Claude Desktop "
-            "หรือติดตั้ง Claude Code แล้วรัน 'claude auth login' "
-            "หรือตั้งค่า Account → จัดการบัญชี"
+            "ยังไม่ได้เชื่อมต่อ Claude — คลิกขวาที่ไอคอน tray → "
+            "เชื่อมต่อบัญชี Claude… เพื่อ login"
         ),
 
         # Menu
@@ -363,6 +384,7 @@ _T: dict[str, dict[str, str]] = {
         "menu.monthly_summary": "ส่งออกสรุปรายเดือน…",
         "menu.language": "ภาษา",
         "menu.open_console": "เปิด Anthropic Console",
+        "menu.claude_usage": "การใช้งาน Claude.ai (Pro/Max)",
         "menu.console_usage": "Dashboard การใช้งาน",
         "menu.console_limits": "Rate limits",
         "menu.maintenance": "ติดตั้ง / อัปเดต",
@@ -383,7 +405,7 @@ _T: dict[str, dict[str, str]] = {
         "toast.reauth_ok": "รีเฟรช Token สำเร็จ",
         "toast.reauth_failed": "Token ยังไม่ถูกต้อง — เปิด Claude Desktop แล้ว login จากนั้นกด Refresh",
         "toast.auth_expired_title": "{app} — Session หมดอายุ",
-        "toast.auth_expired_body": "Token ของ Claude Desktop หมดอายุ จะลองใหม่ใน 30 วิ หรือคลิกขวา → ยืนยันตัวตนใหม่",
+        "toast.auth_expired_body": "Token ของ Claude ถูกปฏิเสธ (หมดอายุหรือ logout) จะลองใหม่ใน 30 วิ — หรือคลิกขวา → เชื่อมต่อบัญชี Claude…",
         "toast.token_refreshing": "Token ใกล้หมดอายุ — กำลังรีเฟรช…",
         "toast.reset_soon_title": "{app} — โควต้าใกล้กลับมาแล้ว",
         "toast.reset_soon_body": "{label} ({pct}%) จะรีเซ็ตในอีก {time} — อีกสักครู่จะใช้ได้อีกครั้ง",
@@ -456,6 +478,27 @@ _T: dict[str, dict[str, str]] = {
         "plan.unknown": "ไม่ทราบ",
 
         # Accounts dialog
+        "menu.connect_claude": "เชื่อมต่อบัญชี Claude…",
+        "connect.title": "Claude Quota — เชื่อมต่อบัญชี Claude",
+        "connect.heading": "เชื่อมต่อบัญชี Claude",
+        "connect.step1": "1. กดปุ่มด้านล่าง — จะมีหน้าต่างรัน 'claude setup-token' แล้วเบราว์เซอร์จะให้ login Claude",
+        "connect.step2": "2. เมื่อหน้าต่างแสดง token ยาว ๆ ขึ้นต้นด้วย sk-ant-oat01- ให้ลากเลือกแล้ว copy (Ctrl+C)",
+        "connect.step3": "3. หน้านี้จะจับ token ให้อัตโนมัติ — กด บันทึก ได้เลย (token เก็บใน Windows Credential Manager ไม่ใช่ไฟล์)",
+        "connect.open_login": "เปิดหน้า login Claude",
+        "connect.install_cli": "ต้องติดตั้ง Claude Code ก่อน…",
+        "connect.no_cli": "ไม่พบ Claude Code CLI ('claude') — ติดตั้งก่อน หรือวาง token ที่มีอยู่แล้วด้านล่าง",
+        "connect.waiting": "รอให้คุณ copy token…",
+        "connect.paste_label": "Token (เติมอัตโนมัติจาก clipboard หรือวางเองตรงนี้):",
+        "connect.found": "พบ token ใน clipboard แล้ว ✓ — กด บันทึก",
+        "connect.verifying": "กำลังตรวจ token กับ Claude…",
+        "connect.saved": "เชื่อมต่อสำเร็จ ✓ — ตัวเลขโควตาจะขึ้นที่ tray ในอีกครู่",
+        "connect.invalid": "ไม่ใช่ token ของ Claude (ต้องขึ้นต้นด้วย sk-ant-oat01-)",
+        "connect.rejected": "Claude ปฏิเสธ token นี้ (401) — รัน setup-token ใหม่แล้ว copy ตัวใหม่",
+        "connect.verify_failed": "ตรวจ token ไม่สำเร็จ: {msg}",
+        "connect.save_failed": "บันทึก token ไม่สำเร็จ: {msg}",
+        "connect.launch_failed": "เปิดหน้าต่าง login ไม่สำเร็จ: {msg}",
+        "connect.disconnect": "ลบ token ที่บันทึกไว้",
+        "connect.removed": "ลบ token แล้ว",
         "dialog.accounts_title": "Claude Quota — บัญชี",
         "dialog.accounts_heading": "บัญชีที่ตั้งค่าไว้",
         "dialog.accounts_desc": (

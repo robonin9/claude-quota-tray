@@ -14,14 +14,23 @@ _LOCK_FD = None
 _LOCK_PATH: Optional[Path] = None
 
 
-def acquire_single_instance() -> bool:
+def acquire_single_instance(wait_seconds: float = 0.0) -> bool:
     global _LOCK_FD, _LOCK_PATH
+    import time
     try:
         lock_dir = Path.home() / "Library" / "Application Support" / "claude-quota-tray"
         lock_dir.mkdir(parents=True, exist_ok=True)
         _LOCK_PATH = lock_dir / "instance.lock"
-        _LOCK_FD = open(_LOCK_PATH, "w")
-        fcntl.flock(_LOCK_FD.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _LOCK_FD = open(_LOCK_PATH, "a+")
+        deadline = time.monotonic() + max(0.0, wait_seconds)
+        while True:
+            try:
+                fcntl.flock(_LOCK_FD.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except (OSError, BlockingIOError):
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.25)
         _LOCK_FD.seek(0)
         _LOCK_FD.truncate()
         _LOCK_FD.write(str(os.getpid()))

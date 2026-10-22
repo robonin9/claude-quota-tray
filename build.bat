@@ -47,6 +47,7 @@ echo === Building with PyInstaller ===
     --hidden-import app_platform ^
     --hidden-import platform_win ^
     --hidden-import platform_darwin ^
+    --hidden-import token_store ^
     --collect-submodules Crypto ^
     src\main.py
 

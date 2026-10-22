@@ -38,7 +38,7 @@ from i18n import LANGUAGES, set_language, t
 from bar_widget import color_emoji, refresh_color_constants, unicode_bar
 from api_client import fetch_usage, format_reset, UsageSnapshot
 from icon_renderer import render_icon
-from token_reader import TokenError
+from token_reader import TokenError, find_expiry_ms
 
 
 def _repo_url() -> str:
@@ -48,6 +48,10 @@ def _repo_url() -> str:
         return f"https://github.com/{owner}/{repo}"
     except ValueError:
         return f"https://github.com/{config.DEFAULT_UPDATE_REPO}"
+
+# Subscription (Pro/Max) usage lives on claude.ai; the Console pages below
+# only apply to API-key billing.
+CLAUDE_USAGE_URL = "https://claude.ai/settings/usage"
 CONSOLE_USAGE_URL = "https://console.anthropic.com/settings/usage"
 CONSOLE_LIMITS_URL = "https://console.anthropic.com/settings/limits"
 
@@ -85,12 +89,11 @@ class AppState:
             return None
         s = self.snapshot.session_pct
         w = self.snapshot.weekly_pct
-        o = self.snapshot.opus_pct
         metric = user_settings.get("tray_icon_metric", "session")
         if metric == "weekly":
             return w if w is not None else s
         if metric == "max":
-            vals = [v for v in (s, w, o) if v is not None]
+            vals = [v for v in (s, w, *_scoped_pcts(self.snapshot)) if v is not None]
             return max(vals) if vals else None
         return s if s is not None else w
 
@@ -104,6 +107,29 @@ class AppState:
 
 
 state = AppState()
+
+
+def _scoped_pcts(snap) -> list:
+    """Percentages of every per-model / extra limit (Opus, Sonnet, …)."""
+    scoped = getattr(snap, "scoped", None) or []
+    if scoped:
+        return [sc.pct for sc in scoped]
+    return [getattr(snap, "opus_pct", None)]
+
+
+def _scoped_rows(snap) -> list:
+    """(key, label, pct, reset_seconds) for each extra limit, Opus first.
+
+    Falls back to the legacy opus_* fields for snapshots built without
+    ``scoped`` (e.g. older tests / callers).
+    """
+    scoped = getattr(snap, "scoped", None) or []
+    if scoped:
+        return [(f"scoped:{sc.key}", sc.label, sc.pct, sc.reset_seconds)
+                for sc in scoped if sc.pct is not None]
+    if getattr(snap, "opus_pct", None) is not None:
+        return [("opus", t('bar.opus_short'), snap.opus_pct, snap.opus_reset_seconds)]
+    return []
 
 
 # --- Helpers --------------------------------------------------------------
@@ -156,6 +182,11 @@ def _maybe_show_setup_notice(icon: pystray.Icon) -> None:
         t("toast.setup_title", app=config.APP_NAME),
         t("toast.setup_body"),
     )
+    # First run without any Claude login: open the guided connect dialog.
+    try:
+        settings_dialogs.open_connect_claude(_on_settings_changed(icon))
+    except Exception:
+        _log_action_error("setup_notice:connect_dialog")
 
 
 def _is_auth_failure(snapshot) -> bool:
@@ -184,12 +215,9 @@ def _load_active_token() -> None:
         state.auth_retry_after = 0.0
         state.auth_401_notified = False
         # Extract expiry for proactive refresh (feature 4)
-        raw = creds.get("raw") or {}
-        expires_ms = raw.get("expiresAt")
+        expires_ms = find_expiry_ms(creds.get("raw") or {})
         state.token_expires_at = (
-            float(expires_ms) / 1000.0
-            if isinstance(expires_ms, (int, float))
-            else None
+            expires_ms / 1000.0 if expires_ms is not None else None
         )
     except TokenError as e:
         state.active_account = None
@@ -398,11 +426,10 @@ def _build_tooltip() -> str:
             f"{t('bar.weekly_short')} {snap.weekly_pct}% "
             f"→ {format_reset(snap.weekly_reset_seconds)}"
         )
-    if snap.opus_pct is not None:
-        parts.append(
-            f"{t('bar.opus_short')} {snap.opus_pct}% "
-            f"→ {format_reset(snap.opus_reset_seconds)}"
-        )
+    for _key, label, pct, reset in _scoped_rows(snap):
+        parts.append(f"{label} {pct}% → {format_reset(reset)}")
+    if getattr(snap, "limited", False):
+        header += " · ⛔"
 
     body = "\n".join(parts) if parts else t('status.no_headers')
     if state.last_poll_at > 0:
@@ -448,13 +475,14 @@ def _check_notifications(icon: pystray.Icon, snap: UsageSnapshot):
     pairs = [
         ("session", snap.session_pct, t('bar.session_short')),
         ("weekly", snap.weekly_pct, t('bar.weekly_short')),
-        ("opus", snap.opus_pct, t('bar.opus_short')),
     ]
+    pairs += [(key, pct, label) for key, label, pct, _r in _scoped_rows(snap)]
     for key, pct, label in pairs:
         if pct is None:
             continue
-        thresholds = _thresholds_for(key)
-        fired = state.fired_thresholds[key]
+        # Per-model weekly caps share the weekly thresholds.
+        thresholds = _thresholds_for("session" if key == "session" else "weekly")
+        fired = state.fired_thresholds.setdefault(key, set())
         fired.intersection_update({th for th in thresholds if pct >= th})
         for threshold in thresholds:
             if pct >= threshold and threshold not in fired:
@@ -491,8 +519,8 @@ def _check_reset_notifications(icon: pystray.Icon, snap: UsageSnapshot) -> None:
     triples = [
         ("session", snap.session_pct, snap.session_reset_seconds, t('bar.session_short')),
         ("weekly", snap.weekly_pct, snap.weekly_reset_seconds, t('bar.weekly_short')),
-        ("opus", snap.opus_pct, snap.opus_reset_seconds, t('bar.opus_short')),
     ]
+    triples += [(key, pct, reset, label) for key, label, pct, reset in _scoped_rows(snap)]
     for key, pct, reset_secs, label in triples:
         if pct is None or reset_secs is None:
             continue
@@ -525,7 +553,7 @@ def _compute_auto_interval() -> int:
     snap = state.snapshot
     if snap is None or not snap.has_data:
         return 60
-    pcts = [p for p in (snap.session_pct, snap.weekly_pct, snap.opus_pct) if p is not None]
+    pcts = [p for p in (snap.session_pct, snap.weekly_pct, *_scoped_pcts(snap)) if p is not None]
     pct = max(pcts) if pcts else 0
 
     max_rate = 0.0
@@ -534,11 +562,9 @@ def _compute_auto_interval() -> int:
         if rate:
             max_rate = max(max_rate, rate)
 
-    soonest_reset = min(
-        [r for r in (snap.session_reset_seconds, snap.weekly_reset_seconds,
-                     snap.opus_reset_seconds) if r is not None],
-        default=None,
-    )
+    resets = [snap.session_reset_seconds, snap.weekly_reset_seconds]
+    resets += [r for _k, _l, _p, r in _scoped_rows(snap)]
+    soonest_reset = min([r for r in resets if r is not None], default=None)
 
     if pct >= 90 or max_rate >= 15 or (soonest_reset is not None and soonest_reset <= 120):
         return _AUTO_MIN
@@ -585,9 +611,7 @@ def action_show_status(icon, item):
     """Left-click action: open the compact status popup with progress bars.
     Falls back to the full history window if the popup fails to spawn."""
     if state.token_error:
-        notifications.notify(icon,
-                             t('toast.token_error_title', app=config.APP_NAME),
-                             state.token_error[:200])
+        settings_dialogs.open_connect_claude(_on_settings_changed(icon))
         return
     name = state.active_account["name"] if state.active_account else config.APP_NAME
 
@@ -783,7 +807,13 @@ def action_check_update(icon, item):
     notifications.notify(icon, config.APP_NAME, t("toast.update_checking"))
 
     def work():
-        result = updater.check_for_update(_update_repo_spec())
+        try:
+            result = updater.check_for_update(_update_repo_spec())
+        except Exception as e:
+            notifications.notify(
+                icon, config.APP_NAME, t("toast.update_error", msg=str(e)[:180])
+            )
+            return
         if result.error:
             notifications.notify(
                 icon,
@@ -854,9 +884,17 @@ def action_configure_update_source(icon, item):
 
 
 def action_open_releases(icon, item):
-    result = updater.check_for_update(_update_repo_spec())
-    url = result.latest.html_url if result.latest else _repo_url() + "/releases"
-    webbrowser.open(url)
+    # Network call — keep it off the tray's message thread so the menu
+    # doesn't freeze while GitHub responds.
+    def work():
+        try:
+            result = updater.check_for_update(_update_repo_spec())
+            url = result.latest.html_url if result.latest else _repo_url() + "/releases"
+        except Exception:
+            url = _repo_url() + "/releases"
+        webbrowser.open(url)
+
+    threading.Thread(target=work, daemon=True).start()
 
 
 def action_open_install_folder(icon, item):
@@ -888,6 +926,10 @@ def action_run_uninstall(icon, item):
     settings_dialogs.confirm_uninstall(lambda: _launch_bat(path))
 
 
+def action_open_claude_usage(icon, item):
+    webbrowser.open(CLAUDE_USAGE_URL)
+
+
 def action_open_console_usage(icon, item):
     webbrowser.open(CONSOLE_USAGE_URL)
 
@@ -905,6 +947,10 @@ def _current_data() -> dict:
         "weekly_reset": snap.weekly_reset_seconds if snap else None,
         "opus_pct": snap.opus_pct if snap else None,
         "opus_reset": snap.opus_reset_seconds if snap else None,
+        "scoped": [
+            {"key": k, "label": label, "pct": p, "reset": r}
+            for k, label, p, r in (_scoped_rows(snap) if snap else [])
+        ],
         "burn": state.burn,
         "plan": state.plan,
         "token_source": state.token_source,
@@ -988,6 +1034,10 @@ def _on_settings_changed(icon: pystray.Icon):
     return _cb
 
 
+def action_connect_claude(icon, item):
+    settings_dialogs.open_connect_claude(_on_settings_changed(icon))
+
+
 def action_manage_accounts(icon, item):
     settings_dialogs.open_accounts(_on_settings_changed(icon))
 
@@ -1053,6 +1103,9 @@ def _make_set_interval(seconds: int):
     return _do
 
 
+_RESTART_FLAG = "--restarted"
+
+
 def _restart_app(icon) -> None:
     """Spawn a replacement instance, then shut this one down.
 
@@ -1066,6 +1119,8 @@ def _restart_app(icon) -> None:
             args = [sys.executable] + sys.argv[1:]
         else:
             args = [sys.executable] + sys.argv
+        if _RESTART_FLAG not in args:
+            args.append(_RESTART_FLAG)
         kwargs: dict = {"close_fds": True, **app_platform.detached_popen_kwargs()}
         subprocess.Popen(args, **kwargs)
     except Exception:
@@ -1136,12 +1191,15 @@ def build_menu():
             enabled=False,
             visible=lambda item: bool(_menu_weekly_text()),
         ),
-        pystray.MenuItem(
-            lambda item: _menu_opus_text(),
-            None,
-            enabled=False,
-            visible=lambda item: bool(_menu_opus_text()),
-        ),
+        *[
+            pystray.MenuItem(
+                lambda item, i=i: _menu_scoped_text(i),
+                None,
+                enabled=False,
+                visible=lambda item, i=i: bool(_menu_scoped_text(i)),
+            )
+            for i in range(_MAX_SCOPED_MENU_ROWS)
+        ],
         pystray.MenuItem(
             lambda item: _menu_burn_text(),
             None,
@@ -1163,6 +1221,11 @@ def build_menu():
             visible=lambda item: state.is_error,
         ),
         pystray.MenuItem(t('menu.open_error_log'), action_open_error_log),
+        pystray.MenuItem(
+            t('menu.connect_claude'),
+            action_connect_claude,
+            visible=lambda item: state.is_error or state.token_error is not None,
+        ),
         pystray.MenuItem(
             t('menu.reauth'),
             action_reauth,
@@ -1192,6 +1255,7 @@ def _build_account_menu():
         ))
     if items:
         items.append(pystray.Menu.SEPARATOR)
+    items.append(pystray.MenuItem(t('menu.connect_claude'), action_connect_claude))
     items.append(pystray.MenuItem(t('menu.manage_accounts'), action_manage_accounts))
     return pystray.Menu(*items)
 
@@ -1367,6 +1431,7 @@ def _build_settings_menu():
 
 def _build_console_menu():
     return pystray.Menu(
+        pystray.MenuItem(t('menu.claude_usage'), action_open_claude_usage),
         pystray.MenuItem(t('menu.console_usage'), action_open_console_usage),
         pystray.MenuItem(t('menu.console_limits'), action_open_console_limits),
     )
@@ -1410,14 +1475,21 @@ def _menu_weekly_text() -> str:
     )
 
 
-def _menu_opus_text() -> str:
+_MAX_SCOPED_MENU_ROWS = 4  # pystray menus are static — reserve a few rows
+
+
+def _menu_scoped_text(index: int) -> str:
+    """Menu row for the index-th per-model limit (Opus, Sonnet, …)."""
     snap = state.snapshot
-    if not snap or not snap.ok or snap.opus_pct is None:
+    if not snap or not snap.ok:
         return ""
-    pct = snap.opus_pct
+    rows = _scoped_rows(snap)
+    if index >= len(rows):
+        return ""
+    _key, label, pct, reset = rows[index]
     return (
-        f"{color_emoji(pct)} {t('bar.opus_short')}  {unicode_bar(pct)}  {pct:>3}%  "
-        f"· {t('bar.resets_in', time=format_reset(snap.opus_reset_seconds))}"
+        f"{color_emoji(pct)} {label}  {unicode_bar(pct)}  {pct:>3}%  "
+        f"· {t('bar.resets_in', time=format_reset(reset))}"
     )
 
 
@@ -1439,15 +1511,49 @@ def _menu_burn_text() -> str:
 
 # --- Entry point ----------------------------------------------------------
 
-def _acquire_single_instance() -> bool:
-    return app_platform.acquire_single_instance()
+def _acquire_single_instance(wait_seconds: float = 0.0) -> bool:
+    return app_platform.acquire_single_instance(wait_seconds)
+
+
+class _IconProxy:
+    """Stable handle to whichever pystray.Icon is currently live.
+
+    main() recreates the Icon if pystray's loop dies unexpectedly. The poll
+    thread holds this proxy instead of a concrete Icon, so it keeps updating
+    the *new* icon and we never need a second poll thread.
+    """
+
+    def __init__(self):
+        object.__setattr__(self, "_icon", None)
+
+    def bind(self, icon: pystray.Icon) -> None:
+        object.__setattr__(self, "_icon", icon)
+
+    def __getattr__(self, name):
+        return getattr(object.__getattribute__(self, "_icon"), name)
+
+    def __setattr__(self, name, value):
+        setattr(object.__getattribute__(self, "_icon"), name, value)
+
+
+_icon_proxy = _IconProxy()
+_poller_started = threading.Event()
 
 
 def _start_poller(icon: pystray.Icon) -> None:
-    """pystray setup hook — show icon and start the background poll thread."""
+    """pystray setup hook — show icon and start the background poll thread.
+
+    Called again each time main() rebuilds the tray icon; the poll thread is
+    started only once and follows the new icon through ``_icon_proxy``.
+    """
     icon.visible = True
-    _sync_desktop_widget(icon)
-    threading.Thread(target=poll_loop, args=(icon,), daemon=True).start()
+    _icon_proxy.bind(icon)
+    _sync_desktop_widget(_icon_proxy)
+    if _poller_started.is_set():
+        _refresh_icon(_icon_proxy)
+        return
+    _poller_started.set()
+    threading.Thread(target=poll_loop, args=(_icon_proxy,), daemon=True).start()
 
 
 def _redirect_stderr_to_log() -> None:
@@ -1476,7 +1582,11 @@ def main():
 
     _redirect_stderr_to_log()
 
-    if not _acquire_single_instance():
+    # A relaunch (Restart / language change / update) starts while the old
+    # process is still shutting down — wait for it to release the lock
+    # instead of showing "already running" and exiting.
+    wait = 15.0 if _RESTART_FLAG in sys.argv else 0.0
+    if not _acquire_single_instance(wait):
         app_platform.already_running_message(config.APP_NAME)
         return
 

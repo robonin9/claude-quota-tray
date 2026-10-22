@@ -536,3 +536,153 @@ def confirm_uninstall(on_confirm: Callable[[], None]) -> None:
             on_confirm()
 
     _spawn("uninstall_confirm", _build)
+
+
+# --- Connect Claude account (claude setup-token) ---------------------------
+
+def open_connect_claude(on_saved: Callable[[], None]) -> None:
+    """Guided login: run `claude setup-token`, catch the token from the
+    clipboard, verify it against the API and store it in the OS secret store."""
+    _spawn("connect_claude", lambda root: _build_connect_claude(root, on_saved))
+
+
+def _build_connect_claude(root: tk.Tk, on_saved: Callable[[], None]) -> None:
+    import token_store
+
+    root.title(t('connect.title'))
+    root.geometry("560x400")
+    root.minsize(480, 360)
+    try:
+        root.attributes("-topmost", True)
+        root.after(600, lambda: root.attributes("-topmost", False))
+    except tk.TclError:
+        pass
+
+    _label(root, t('connect.heading'),
+           font=ui_font(12, "bold")).pack(anchor="w", padx=16, pady=(14, 4))
+    for key in ('connect.step1', 'connect.step2', 'connect.step3'):
+        tk.Label(root, text=t(key), fg=_FG, bg=_BG, font=ui_font(9),
+                 justify="left", anchor="w", wraplength=520).pack(
+            fill="x", padx=16, pady=(4, 0))
+
+    cli = token_store.find_claude_cli()
+
+    status = tk.StringVar(value=t('connect.waiting') if cli else t('connect.no_cli'))
+    token_var = tk.StringVar()
+    state = {"token": None, "busy": False}
+
+    open_row = tk.Frame(root, bg=_BG)
+    open_row.pack(fill="x", padx=16, pady=(12, 6))
+
+    def _open_login():
+        if not cli:
+            import webbrowser
+            webbrowser.open("https://docs.claude.com/en/docs/claude-code/setup")
+            return
+        try:
+            token_store.launch_setup_token(cli)
+            status.set(t('connect.waiting'))
+        except Exception as e:
+            status.set(t('connect.launch_failed', msg=str(e)[:120]))
+
+    _styled_button(open_row,
+                   t('connect.open_login') if cli else t('connect.install_cli'),
+                   _open_login, primary=True).pack(side="left")
+
+    _label(root, t('connect.paste_label'), muted=True).pack(anchor="w", padx=16, pady=(10, 2))
+    entry = tk.Entry(
+        root, textvariable=token_var, show="•",
+        bg=_ENTRY_BG, fg=_FG, insertbackground=_FG, relief="flat",
+        font=ui_font(10), highlightthickness=1, highlightcolor=_ACCENT,
+        highlightbackground="#3a3a3a",
+    )
+    entry.pack(fill="x", padx=16)
+
+    status_lbl = tk.Label(root, textvariable=status, fg=_MUTED, bg=_BG,
+                          font=ui_font(9), justify="left", anchor="w",
+                          wraplength=520)
+    status_lbl.pack(fill="x", padx=16, pady=(8, 0))
+
+    btn_row = tk.Frame(root, bg=_BG)
+    btn_row.pack(fill="x", padx=16, pady=14, side="bottom")
+
+    def _poll_clipboard():
+        """Pick the token up automatically as soon as the user copies it."""
+        if not root.winfo_exists():
+            return
+        if not state["busy"] and not token_var.get().strip():
+            try:
+                clip = root.clipboard_get()
+            except tk.TclError:
+                clip = ""
+            found = token_store.extract_token(clip)
+            if found:
+                token_var.set(found)
+                status.set(t('connect.found'))
+                status_lbl.configure(fg=_ACCENT)
+        root.after(700, _poll_clipboard)
+
+    def _finish_ok(token: str):
+        try:
+            token_store.save_token(token)
+        except Exception as e:
+            state["busy"] = False
+            status.set(t('connect.save_failed', msg=str(e)[:150]))
+            return
+        # Don't leave the secret sitting on the clipboard.
+        try:
+            if token_store.extract_token(root.clipboard_get()) == token:
+                root.clipboard_clear()
+                root.clipboard_append("")
+        except tk.TclError:
+            pass
+        status.set(t('connect.saved'))
+        status_lbl.configure(fg="#22c55e")
+        on_saved()
+        root.after(1200, root.destroy)
+
+    def _finish_fail(msg: str):
+        state["busy"] = False
+        status.set(msg)
+        status_lbl.configure(fg="#ef4444")
+
+    def _do_save():
+        if state["busy"]:
+            return
+        token = token_store.extract_token(token_var.get()) or token_var.get().strip()
+        if not token_store.looks_valid(token):
+            _finish_fail(t('connect.invalid'))
+            return
+        state["busy"] = True
+        status.set(t('connect.verifying'))
+        status_lbl.configure(fg=_MUTED)
+
+        def work():
+            from api_client import fetch_usage
+            try:
+                snap = fetch_usage(token)
+            except Exception as e:  # never leave the dialog stuck "verifying"
+                root.after(0, lambda: _finish_fail(t('connect.verify_failed', msg=str(e)[:150])))
+                return
+            if snap.ok or snap.has_data:
+                root.after(0, lambda: _finish_ok(token))
+            elif snap.http_status in (401, 403):
+                root.after(0, lambda: _finish_fail(t('connect.rejected')))
+            else:
+                err = (snap.error or "unknown")[:150]
+                root.after(0, lambda: _finish_fail(t('connect.verify_failed', msg=err)))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _do_disconnect():
+        token_store.delete_token()
+        on_saved()
+        status.set(t('connect.removed'))
+
+    _styled_button(btn_row, t('common.save'), _do_save, primary=True).pack(side="right")
+    _styled_button(btn_row, t('common.cancel'), root.destroy).pack(side="right", padx=(0, 8))
+    if token_store.load_token():
+        _styled_button(btn_row, t('connect.disconnect'), _do_disconnect).pack(side="left")
+
+    entry.bind("<Return>", lambda _e: _do_save())
+    root.after(300, _poll_clipboard)

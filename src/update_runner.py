@@ -54,7 +54,7 @@ def cmd_apply(repo: str) -> int:
         main = root / "src" / "main.py"
         if pyw and main.is_file():
             subprocess.Popen(
-                [str(pyw), str(main)],
+                [str(pyw), str(main), "--restarted"],
                 cwd=root,
                 creationflags=subprocess.DETACHED_PROCESS
                 if sys.platform == "win32"

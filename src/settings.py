@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict
@@ -103,6 +104,15 @@ def load() -> Dict[str, Any]:
                     data = json.load(f)
                 data = _migrate(data)
             except (OSError, json.JSONDecodeError):
+                # Keep the unreadable file instead of silently overwriting the
+                # user's accounts/thresholds with defaults.
+                try:
+                    backup = SETTINGS_PATH.with_name(
+                        f"settings.corrupt-{int(time.time())}.json"
+                    )
+                    SETTINGS_PATH.replace(backup)
+                except OSError:
+                    pass
                 data = _defaults()
         else:
             data = _defaults()

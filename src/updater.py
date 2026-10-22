@@ -169,7 +169,8 @@ def check_for_update(repo_spec: str, current_version: str | None = None) -> Upda
             update_available=False,
             error=str(e),
         )
-    except (URLError, ValueError, json.JSONDecodeError, KeyError) as e:
+    except (URLError, OSError, ValueError, json.JSONDecodeError, KeyError) as e:
+        # OSError also covers socket timeouts during the response read.
         return UpdateCheckResult(
             current_version=current,
             latest=None,
@@ -248,6 +249,7 @@ def apply_exe_update(project_dir: Path, release: ReleaseInfo) -> str:
         bat = project_dir / "Apply Claude Quota Tray update.bat"
         bat.write_text(
             "@echo off\n"
+            'cd /d "%~dp0"\n'
             "timeout /t 3 /nobreak >nul\n"
             f'move /y "{staging.name}" "{dest.name}"\n'
             f'start "" "{dest.name}"\n'

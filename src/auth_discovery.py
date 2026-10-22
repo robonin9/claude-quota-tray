@@ -39,9 +39,14 @@ Provider = Callable[[], Optional[dict]]
 
 
 def _try_desktop() -> Optional[dict]:
-    from desktop_auth import try_read_desktop_credentials
+    """Claude Desktop token. Returns None only when Desktop isn't installed;
+    otherwise a failure raises TokenError with the real reason so the
+    summary / --probe can show *why* (missing key, new encryption, …)."""
+    from desktop_auth import claude_desktop_dirs, read_desktop_credentials
 
-    return try_read_desktop_credentials()
+    if not claude_desktop_dirs():
+        return None
+    return read_desktop_credentials()
 
 
 def _try_macos_keychain() -> Optional[dict]:
@@ -79,8 +84,12 @@ def _try_macos_keychain() -> Optional[dict]:
 
 def _providers_for_platform() -> list[tuple[str, Provider]]:
     """(label, callable) in try order — first success wins."""
+    from token_store import read_app_credentials
+
     chain: list[tuple[str, Provider]] = [
         ("environment", _read_env_token),
+        # Token saved via tray menu → "Connect Claude account" (setup-token).
+        ("app-token", read_app_credentials),
         ("claude-desktop", _try_desktop),
     ]
     if sys.platform == "win32":
@@ -101,9 +110,13 @@ def read_credentials(exclude_tokens: Optional[set] = None) -> dict:
 
     Raises TokenError with a summary of everything that was tried.
     """
+    from token_reader import find_expiry_ms
+
     exclude = exclude_tokens or set()
     failures: list[str] = []
     skipped_bad = False
+    expired_fallback: Optional[dict] = None
+    now_ms = time.time() * 1000.0
     for name, provider in _providers_for_platform():
         try:
             creds = provider()
@@ -113,12 +126,24 @@ def read_credentials(exclude_tokens: Optional[set] = None) -> dict:
                     failures.append(f"{name}: token rejected earlier (skipped)")
                     continue
                 creds.setdefault("source", name)
+                exp = find_expiry_ms(creds.get("raw") or {})
+                if exp is not None and exp <= now_ms:
+                    # Stale (e.g. Claude Code not run for a while) — prefer a
+                    # fresh token from another source, but keep this one as a
+                    # last resort since the server is the final judge.
+                    failures.append(f"{name}: token expired")
+                    if expired_fallback is None:
+                        expired_fallback = creds
+                    continue
                 return creds
             failures.append(f"{name}: not found")
         except TokenError as e:
             failures.append(f"{name}: {e}")
         except Exception as e:
             failures.append(f"{name}: {type(e).__name__}: {e}")
+
+    if expired_fallback is not None:
+        return expired_fallback
 
     summary = _format_failure_summary(failures)
     if skipped_bad:
@@ -138,13 +163,9 @@ def _token_fingerprint(token: str) -> str:
 
 def _expiry_note(creds: dict) -> str:
     """Human note about token expiry, if the source exposes it."""
-    raw = creds.get("raw") or {}
-    expires_ms = None
-    for key in ("expiresAt", "expires_at", "expiry"):
-        val = raw.get(key) if isinstance(raw, dict) else None
-        if isinstance(val, (int, float)):
-            expires_ms = float(val)
-            break
+    from token_reader import find_expiry_ms
+
+    expires_ms = find_expiry_ms(creds.get("raw") or {})
     if expires_ms is None:
         return ""
     secs = expires_ms / 1000.0 - time.time()
@@ -180,7 +201,112 @@ def probe_auth_sources() -> list[AuthProbeResult]:
             results.append(AuthProbeResult(name, False, str(e)[:200]))
         except Exception as e:
             results.append(AuthProbeResult(name, False, f"{type(e).__name__}: {e}"[:200]))
+    results.extend(_probe_locations())
     return results
+
+
+def _probe_locations() -> list[AuthProbeResult]:
+    """Which credential locations exist (names/sizes only — never contents)."""
+    from desktop_auth import claude_desktop_dirs
+    from token_reader import _candidate_paths
+
+    rows: list[AuthProbeResult] = []
+    for p in _candidate_paths():
+        if not p.is_file():
+            continue
+        detail = f"exists ({p.stat().st_size} bytes)"
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            # Big config files: top-level keys only.
+            depth = 1 if p.stat().st_size > 4096 else 3
+            detail += f" shape={_redacted_shape(data, depth)}"
+        except Exception as e:
+            detail += f" unreadable: {type(e).__name__}"
+        rows.append(AuthProbeResult(f"file {p}", True, detail))
+    for d in claude_desktop_dirs():
+        cfg = d / "config.json"
+        state = d / "Local State"
+        detail = (f"config.json={'yes' if cfg.is_file() else 'no'}, "
+                  f"Local State={'yes' if state.is_file() else 'no'}")
+        if cfg.is_file():
+            try:
+                keys = sorted(json.loads(cfg.read_text(encoding="utf-8")).keys())
+                detail += f", keys={keys}"
+            except Exception as e:
+                detail += f", unreadable: {type(e).__name__}"
+        try:
+            names = sorted(x.name + ("/" if x.is_dir() else "") for x in d.iterdir())
+            detail += f", entries={names[:60]}"
+        except OSError as e:
+            detail += f", cannot list: {e}"
+        rows.append(AuthProbeResult(f"desktop dir {d}", True, detail))
+    if sys.platform == "win32":
+        for target, size in _list_windows_credentials():
+            rows.append(AuthProbeResult(f"credential-manager {target}", True,
+                                        f"blob {size} bytes"))
+    return rows
+
+
+def _redacted_shape(data, depth: int = 3):
+    """Structure of a JSON value with every secret hidden.
+
+    Strings become ``str(len=N)``; token-looking strings also show a short,
+    non-secret prefix (``sk-ant-oa…``) so the token *type* is identifiable.
+    """
+    if depth <= 0:
+        return type(data).__name__
+    if isinstance(data, dict):
+        return {k: _redacted_shape(v, depth - 1) for k, v in list(data.items())[:40]}
+    if isinstance(data, list):
+        return [f"list(len={len(data)})"] + (
+            [_redacted_shape(data[0], depth - 1)] if data else [])
+    if isinstance(data, str):
+        if data.startswith("sk-ant-"):
+            return f"str(len={len(data)}, {data[:9]}…)"
+        return f"str(len={len(data)})"
+    return type(data).__name__
+
+
+def _list_windows_credentials() -> list[tuple[str, int]]:
+    """(target name, blob size) of Credential Manager entries mentioning
+    Claude/Anthropic — names only, never the secret."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except ImportError:
+        return []
+
+    class FILETIME(ctypes.Structure):
+        _fields_ = [("lo", wintypes.DWORD), ("hi", wintypes.DWORD)]
+
+    class CREDENTIALW(ctypes.Structure):
+        _fields_ = [
+            ("Flags", wintypes.DWORD), ("Type", wintypes.DWORD),
+            ("TargetName", wintypes.LPWSTR), ("Comment", wintypes.LPWSTR),
+            ("LastWritten", FILETIME), ("CredentialBlobSize", wintypes.DWORD),
+            ("CredentialBlob", ctypes.c_void_p), ("Persist", wintypes.DWORD),
+            ("AttributeCount", wintypes.DWORD), ("Attributes", ctypes.c_void_p),
+            ("TargetAlias", wintypes.LPWSTR), ("UserName", wintypes.LPWSTR),
+        ]
+
+    out: list[tuple[str, int]] = []
+    try:
+        advapi32 = ctypes.windll.advapi32
+        count = wintypes.DWORD()
+        creds = ctypes.POINTER(ctypes.POINTER(CREDENTIALW))()
+        if not advapi32.CredEnumerateW(None, 0, ctypes.byref(count), ctypes.byref(creds)):
+            return []
+        try:
+            for i in range(count.value):
+                c = creds[i].contents
+                name = c.TargetName or ""
+                if "claude" in name.lower() or "anthropic" in name.lower():
+                    out.append((name, int(c.CredentialBlobSize)))
+        finally:
+            advapi32.CredFree(creds)
+    except Exception:
+        return out
+    return out
 
 
 def _format_failure_summary(failures: list[str]) -> str:
@@ -188,9 +314,9 @@ def _format_failure_summary(failures: list[str]) -> str:
     lines = "\n  - ".join(failures)
     hints = {
         "win32": (
-            "On Windows: sign in to Claude Desktop (MSIX app) or Claude Code CLI. "
-            "Paths include %LOCALAPPDATA%\\Packages\\Claude_*\\...\\Claude\\config.json "
-            "and Credential Manager."
+            "Fix: tray menu → Connect Claude account… (runs `claude setup-token` "
+            "and stores a long-lived token in Credential Manager). Newer Claude "
+            "Desktop builds no longer keep a readable token on disk."
         ),
         "darwin": (
             "On macOS: sign in to Claude Desktop or Claude Code. "

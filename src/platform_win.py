@@ -9,12 +9,39 @@ from pathlib import Path
 from typing import Optional
 
 
-def acquire_single_instance() -> bool:
+_MUTEX_NAME = "Local\\ClaudeQuotaTray_v1"
+_ERROR_ALREADY_EXISTS = 183
+_mutex_handle = None  # keep a reference so the mutex lives as long as the process
+
+
+def acquire_single_instance(wait_seconds: float = 0.0) -> bool:
+    """Take the single-instance mutex.
+
+    ``wait_seconds`` > 0 retries while another instance still holds it — used
+    by Restart / language change, where the old process is shutting down
+    while the new one starts.
+    """
+    global _mutex_handle
     try:
         import ctypes
-        kernel32 = ctypes.windll.kernel32
-        kernel32.CreateMutexW(None, True, "Local\\ClaudeQuotaTray_v1")
-        return kernel32.GetLastError() != 183
+        import time
+        from ctypes import wintypes
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateMutexW.restype = wintypes.HANDLE
+        kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        deadline = time.monotonic() + max(0.0, wait_seconds)
+        while True:
+            handle = kernel32.CreateMutexW(None, True, _MUTEX_NAME)
+            err = ctypes.get_last_error()
+            if handle and err != _ERROR_ALREADY_EXISTS:
+                _mutex_handle = handle
+                return True
+            if handle:
+                kernel32.CloseHandle(handle)
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.25)
     except Exception:
         return True
 

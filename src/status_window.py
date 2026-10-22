@@ -164,8 +164,9 @@ def _build_widgets(root: tk.Tk, account_name: str,
     session_bar["frame"].pack(fill="x", pady=(0, 8))
     weekly_bar = build_bar(panel, t('bar.weekly_label'))
     weekly_bar["frame"].pack(fill="x")
-    # Opus weekly bar — only packed when the account exposes that limit.
-    opus_bar = build_bar(panel, t('bar.opus_label'))
+    # Per-model weekly limits (Opus, Sonnet, …) — one bar each, created on
+    # demand because which limits exist depends on the plan.
+    scoped_bars: dict = {}
 
     footer = tk.Frame(root, bg=c["BG"])
     footer.pack(fill="x", padx=14, pady=(8, 12), side="bottom")
@@ -183,12 +184,30 @@ def _build_widgets(root: tk.Tk, account_name: str,
             data = {}
         apply_bar(session_bar, data.get("session_pct"), data.get("session_reset"))
         apply_bar(weekly_bar, data.get("weekly_pct"), data.get("weekly_reset"))
-        if data.get("opus_pct") is not None:
-            if not opus_bar["frame"].winfo_ismapped():
-                opus_bar["frame"].pack(fill="x", pady=(8, 0))
-            apply_bar(opus_bar, data.get("opus_pct"), data.get("opus_reset"))
-        elif opus_bar["frame"].winfo_ismapped():
-            opus_bar["frame"].pack_forget()
+        rows = data.get("scoped")
+        if rows is None and data.get("opus_pct") is not None:
+            rows = [{"key": "opus", "label": t('bar.opus_label'),
+                     "pct": data.get("opus_pct"), "reset": data.get("opus_reset")}]
+        rows = rows or []
+        live = {r["key"] for r in rows}
+        for key in list(scoped_bars):
+            if key not in live:
+                scoped_bars.pop(key)["frame"].destroy()
+        grew = False
+        for r in rows:
+            bar = scoped_bars.get(r["key"])
+            if bar is None:
+                bar = build_bar(panel, r["label"])
+                bar["frame"].pack(fill="x", pady=(8, 0))
+                scoped_bars[r["key"]] = bar
+                grew = True
+            apply_bar(bar, r.get("pct"), r.get("reset"))
+        if grew:
+            # Make room for the new bars instead of clipping them.
+            root.update_idletasks()
+            need = root.winfo_reqheight()
+            if need > root.winfo_height():
+                root.geometry(f"{root.winfo_width()}x{need}")
         burn_lbl.configure(text=format_burn(data.get("burn") or {}))
         plan = data.get("plan")
         plan_lbl.configure(text=("· " + plan) if plan else "")

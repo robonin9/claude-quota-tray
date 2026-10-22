@@ -82,8 +82,17 @@ def _decrypt_v10_payload(master_key: bytes, raw: bytes) -> bytes:
     _require_crypto()
     from Crypto.Cipher import AES
 
+    if raw.startswith(b"v20"):
+        raise TokenError(
+            "Claude Desktop uses Chromium app-bound encryption (v20), which "
+            "other programs cannot decrypt — sign in to Claude Code CLI "
+            "(`claude` → /login) so ~/.claude/.credentials.json exists, or set "
+            "CLAUDE_CODE_OAUTH_TOKEN"
+        )
     if not raw.startswith(b"v10"):
-        raise TokenError("Unexpected encryption format (expected v10 prefix)")
+        raise TokenError(
+            f"Unexpected encryption format (prefix {raw[:3]!r}, expected v10)"
+        )
     iv = raw[3:15]
     payload = raw[15:]
     return AES.new(master_key, AES.MODE_GCM, nonce=iv).decrypt_and_verify(
@@ -274,18 +283,18 @@ def read_desktop_credentials() -> dict:
     if sys.platform not in ("win32", "darwin", "linux"):
         raise TokenError(f"Unsupported platform: {sys.platform}")
 
-    last_error: Optional[str] = None
+    errors: list[str] = []
     for claude_dir in claude_desktop_dirs():
         try:
             return read_desktop_credentials_from_dir(claude_dir)
         except TokenError as e:
-            last_error = str(e)
+            errors.append(f"{claude_dir}: {e}")
         except Exception as e:
-            last_error = f"{claude_dir}: {e}"
+            errors.append(f"{claude_dir}: {type(e).__name__}: {e}")
 
     msg = "Claude Desktop credentials not found."
-    if last_error:
-        msg += f" Last error: {last_error}"
+    if errors:
+        msg += " " + " | ".join(errors)
     raise TokenError(msg)
 
 

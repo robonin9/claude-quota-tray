@@ -11,6 +11,23 @@ All notable changes to this fork are documented here.
 
 Changes compared to upstream v0.2.0. Tray UI, polling, history, and notifications are otherwise the same unless noted.
 
+### Review fixes (2026-10)
+
+- **No duplicate poll threads after a tray crash.** When pystray's loop died and `main()` rebuilt the icon, `_start_poller` spawned a *second* poller each time (double API calls, double toasts). The poller now starts once and follows the live icon via `_IconProxy`.
+- **Restart / language change no longer races the single-instance lock.** The relaunched process gets `--restarted` and waits up to 15 s for the old one to release the mutex instead of popping "already running" and exiting. Mutex check now uses `use_last_error` (reliable `GetLastError`) and keeps the handle.
+- **OAuth header.** Requests send `anthropic-beta: oauth-2025-04-20` with Bearer tokens (as Claude Code does); `sk-ant-api*` keys use `x-api-key`.
+- **Token expiry detected for Claude Code credential files.** `expiresAt` is nested under `claudeAiOauth`; new `token_reader.find_expiry_ms()` searches recursively, so proactive reload, the tooltip warning and `--probe` now work for that source.
+- **Corrupt `settings.json` is backed up** (`settings.corrupt-<ts>.json`) instead of being silently replaced by defaults (losing accounts).
+- **Menu no longer freezes on "Open releases"** (GitHub call moved off the tray thread); update check also catches socket timeouts.
+- **.exe self-update batch** now `cd`s to its own folder before `move`.
+- **New menu item: Claude.ai usage (Pro/Max)** → `claude.ai/settings/usage` (Console pages only cover API billing).
+- **Every per-model limit is shown, not just Opus.** All `anthropic-ratelimit-unified-*` windows beyond 5h/weekly (Opus, Sonnet, Fable, …) become `UsageSnapshot.scoped` entries with readable labels; they appear in the tooltip, tray menu (up to 4 rows), status popup (one bar each), "max" tray metric, threshold alerts (weekly thresholds) and near-reset toasts. `opus_*` fields kept for history/back-compat.
+- **"Limit reached" marker** (⛔ in tooltip) when any window reports `rejected`/`exceeded`.
+- **Model fallback.** If the probe model is retired (404 / not_found), the next of `FALLBACK_MODELS` is tried and remembered — a Haiku deprecation no longer breaks the tray. Auth errors are not retried across models.
+- **Expired tokens are skipped** during discovery when another source has a fresh one (e.g. stale Claude Code file vs. live Claude Desktop); the expired one is only used as a last resort.
+- **Diagnostics:** `python src/api_client.py --raw` prints the raw rate-limit headers and the `/api/oauth/usage` JSON (token never printed).
+- Tests: `tests/test_review_fixes.py`.
+
 ### Accuracy (api_client.py, history.py)
 
 - **Quota parsing grounded in the real header format.** Verified against Anthropic docs and observed Claude Code/Max responses: `anthropic-ratelimit-unified-*-utilization` is a **fraction 0.0–1.0** (e.g. `0.0184` = ~2 %, `1` = 100 %), and `*-reset` is a **Unix epoch timestamp**. `_pct_from_utilization` now documents this, rounds half-up so tiny usage (`0.005` → 1 %) is not swallowed, and only falls back to "already a percentage" for values > 1. (Note: the previously suspected "`1` read as 100 %" is in fact *correct* for the real fractional format — `1` genuinely means full.)

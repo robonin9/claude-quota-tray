@@ -32,3 +32,13 @@ dist/
 # Local Claude Code agent instructions — not for distribution
 CLAUDE.md
 
+# Secrets - never commit tokens / credentials
+token.txt
+*token*.txt
+*.token
+.credentials.json
+credentials.json
+settings.corrupt-*.json
+
+# Local Claude Code permissions (machine-specific)
+.claude/settings.local.json

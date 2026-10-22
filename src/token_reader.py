@@ -133,6 +133,34 @@ def _find_first(data, keys: tuple[str, ...]) -> Optional[str]:
     return None
 
 
+_EXPIRY_KEYS = ("expiresAt", "expires_at", "expiry")
+
+
+def find_expiry_ms(data) -> Optional[float]:
+    """Token expiry as epoch milliseconds, searched recursively.
+
+    Claude Code nests it (``{"claudeAiOauth": {"expiresAt": ...}}``), so a
+    top-level lookup alone misses the most common credential file. Values
+    that look like epoch *seconds* are scaled to milliseconds.
+    """
+    if isinstance(data, dict):
+        for k in _EXPIRY_KEYS:
+            val = data.get(k)
+            if isinstance(val, (int, float)) and not isinstance(val, bool) and val > 0:
+                val = float(val)
+                return val * 1000.0 if val < 1e11 else val
+        for v in data.values():
+            r = find_expiry_ms(v)
+            if r is not None:
+                return r
+    elif isinstance(data, list):
+        for item in data:
+            r = find_expiry_ms(item)
+            if r is not None:
+                return r
+    return None
+
+
 def _format_plan(subscription: Optional[str], tier: Optional[str]) -> Optional[str]:
     if tier:
         low = tier.lower()
@@ -263,10 +291,21 @@ def _read_credentials_files() -> Optional[dict]:
         except OSError as e:
             last_error = f"Could not read {path}: {e}"
         except TokenError:
+            if _is_logged_out_claude_code(data):
+                last_error = (
+                    f"{path}: Claude Code is signed out (accessToken is empty). "
+                    "Use tray menu → Connect Claude account…"
+                )
             continue
     if last_error:
         raise TokenError(last_error)
     return None
+
+
+def _is_logged_out_claude_code(data) -> bool:
+    """Claude Code keeps the claudeAiOauth block but blanks the tokens on logout."""
+    block = data.get("claudeAiOauth") if isinstance(data, dict) else None
+    return isinstance(block, dict) and not (block.get("accessToken") or "").strip()
 
 
 def read_token() -> str:
