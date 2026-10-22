@@ -7,8 +7,11 @@ fork, so please always run the most recent version before reporting an issue.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.3.x   | :white_check_mark: |
-| < 0.3   | :x:                |
+| 0.4.x   | :white_check_mark: |
+| < 0.4   | :x:                |
+
+0.4.0 is the first release with signed in-app updates; earlier versions
+install updates without verification, so upgrade to 0.4.x manually.
 
 ## How the app handles your credentials
 

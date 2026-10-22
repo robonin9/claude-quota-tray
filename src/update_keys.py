@@ -11,4 +11,7 @@ refused. A fork must put its own key here — it cannot install releases signed
 by someone else's key, and vice versa.
 """
 
-UPDATE_PUBLIC_KEYS: list[str] = []
+UPDATE_PUBLIC_KEYS: list[str] = [
+    # robonin9 release key, created 2026-10-23
+    "14753277de50ca714b1cd72dbd1ff787be9b32b38cb231b4b2011682e64abd63",
+]
