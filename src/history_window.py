@@ -4,17 +4,14 @@ Full history window: progress bars + separate Session / Weekly chart panels.
 
 from __future__ import annotations
 
-import csv
-import threading
-import time
 import tkinter as tk
-from pathlib import Path
 from tkinter import filedialog, messagebox
 from typing import Callable, Optional
 
 import chart_widget
 import history
 import settings as user_settings
+import ui_host
 from bar_widget import (
     apply_bar, build_bar, format_burn, refresh_color_constants, ui_font,
 )
@@ -22,25 +19,15 @@ from i18n import t
 from ui_theme import colors
 
 
-_window_lock = threading.Lock()
-_open_window: Optional[tk.Tk] = None
+# Only touched on the UI thread.
+_open_window: Optional[tk.Toplevel] = None
 
 SnapshotFetcher = Callable[[], dict]
 
 
 def show(account_id: str, account_name: str,
          get_data: Optional[SnapshotFetcher] = None,
-         burn: Optional[dict] = None) -> None:
-    with _window_lock:
-        global _open_window
-        if _open_window is not None:
-            try:
-                _open_window.lift()
-                _open_window.focus_force()
-                return
-            except tk.TclError:
-                _open_window = None
-
+         burn: Optional[dict] = None) -> bool:
     if get_data is None:
         b = burn or {"session": {}, "weekly": {}}
         get_data = lambda: {
@@ -48,28 +35,38 @@ def show(account_id: str, account_name: str,
             "session_reset": None, "weekly_reset": None,
             "burn": b,
         }
-
-    threading.Thread(
-        target=_run_window,
-        args=(account_id, account_name, get_data),
-        daemon=True,
-    ).start()
+    return ui_host.call(_open_or_focus, account_id, account_name, get_data)
 
 
-def _run_window(account_id: str, account_name: str,
-                get_data: SnapshotFetcher) -> None:
+def _open_or_focus(account_id: str, account_name: str,
+                   get_data: SnapshotFetcher) -> None:
     global _open_window
+    if _open_window is not None and _open_window.winfo_exists():
+        _open_window.deiconify()
+        _open_window.lift()
+        _open_window.focus_force()
+        return
+    win = _build_window(account_id, account_name, get_data)
+    _open_window = win
+    ui_host.on_destroy(win, lambda: _forget(win))
+
+
+def _forget(win: tk.Toplevel) -> None:
+    global _open_window
+    if _open_window is win:
+        _open_window = None
+
+
+def _build_window(account_id: str, account_name: str,
+                  get_data: SnapshotFetcher) -> tk.Toplevel:
     refresh_color_constants()
     c = colors()
 
-    root = tk.Tk()
+    root = tk.Toplevel(ui_host.root())
     root.title(t("window.history_title", name=account_name))
     root.geometry("760x720")
     root.minsize(560, 520)
     root.configure(bg=c["BG"])
-
-    with _window_lock:
-        _open_window = root
 
     hours_var = tk.DoubleVar(value=24.0)
 
@@ -174,22 +171,22 @@ def _run_window(account_id: str, account_name: str,
 
     session_chart["canvas"].bind("<Configure>", lambda _e: _redraw_charts())
     weekly_chart["canvas"].bind("<Configure>", lambda _e: _redraw_charts())
-    root.after(50, _refresh_all)
+    def _first_refresh():
+        if root.winfo_exists():
+            _refresh_all()
+
+    ui_host.after(50, _first_refresh)
 
     def _auto():
+        if not root.winfo_exists():
+            return
         try:
             _refresh_all()
         except tk.TclError:
             return
-        root.after(30_000, _auto)
+        ui_host.after(30_000, _auto)
 
-    root.after(30_000, _auto)
+    ui_host.after(30_000, _auto)
 
-    def on_close():
-        global _open_window
-        with _window_lock:
-            _open_window = None
-        root.destroy()
-
-    root.protocol("WM_DELETE_WINDOW", on_close)
-    root.mainloop()
+    root.protocol("WM_DELETE_WINDOW", root.destroy)
+    return root

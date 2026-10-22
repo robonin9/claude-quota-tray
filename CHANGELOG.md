@@ -11,6 +11,18 @@ All notable changes to this fork are documented here.
 
 Changes compared to upstream v0.2.0. Tray UI, polling, history, and notifications are otherwise the same unless noted.
 
+### Stability: one Tk root, live tray menu (2026-10)
+
+- **All windows share one Tk root on one UI thread** (`src/ui_host.py`). Status popup, history window, desktop widget and every settings dialog — including *Connect Claude account* — were each a separate `tk.Tk()` running `mainloop()` on its own thread, which crashes Tcl at random on Windows (`Tcl_AsyncDelete: async handler deleted by the wrong thread`). They are now `Toplevel`s of a single hidden root; other threads hand work over with `ui_host.call()` / `call_sync()` and never touch Tk, not even `.after()`. `call_sync()` from the UI thread runs inline, so a window button calling back into the app cannot deadlock. Tk objects are released on the UI thread when the app quits.
+- **Connect Claude account dialog** no longer calls `root.after()` from its token-verification thread, and ignores results that arrive after the dialog was closed.
+- **Tray menu is rebuilt every time it opens** (`src/tray_icon.py`). pystray's Windows backend caches the native menu, so the % lines in the right-click menu were stale until you clicked something, and accounts added in *Manage accounts* didn't appear. The menu is now rebuilt on right-click, on pystray's own thread; radio/check marks, the schedule label and the account list are read live. `pystray` is pinned `<0.20` because this hooks its internals (falls back to plain behaviour if they change).
+- **Dialogs no longer modify the tray menu from the wrong thread.** Saving a dialog only flags a refresh; the poll thread reloads the token and repaints the icon.
+- **Message boxes stay on top of their dialog** (they were owned by the hidden root and could open behind it).
+- **Confirming an update or uninstall no longer freezes all windows** while it downloads / launches the script.
+- **Copy status to clipboard** uses the shared root instead of creating a throwaway `tk.Tk()`.
+- Tests: `tests/test_ui_host.py`, `tests/test_tray_icon.py`.
+- **Known limitation (macOS):** Tk and AppKit both need the main thread on macOS, which pystray currently owns, so windows on macOS remain beta. `ui_host.run_forever()` exists for a follow-up that lets Tk own the main thread with `icon.run_detached()`.
+
 ### Review fixes (2026-10)
 
 - **No duplicate poll threads after a tray crash.** When pystray's loop died and `main()` rebuilt the icon, `_start_poller` spawned a *second* poller each time (double API calls, double toasts). The poller now starts once and follows the live icon via `_IconProxy`.
@@ -49,7 +61,7 @@ Changes compared to upstream v0.2.0. Tray UI, polling, history, and notification
 - **CSV export no longer crashes.** `history.export_csv` used the `csv` module without importing it — any "Export CSV" click raised `NameError`. Added the import (covered by a regression test).
 - **Poll loop is now crash-proof per iteration.** The fetch → record → burn-rate → notify path is wrapped so a network drop, DNS failure, lost token, unexpected API schema change, or SQLite hiccup logs to `error.log` and backs off (exponential, capped) instead of bubbling out and forcing a full poller restart.
 - **SQLite concurrency hardened.** History opens in **WAL** mode with a `busy_timeout`, so the chart window's reads don't block the poller's writes (and vice-versa) and brief locks resolve instead of erroring.
-- **Tray/Tk race hardened.** `desktop_widget.refresh()` (called from the poll thread) now snapshots the window reference under its lock before `.after()`, so a concurrent `hide()` on the UI thread can't trigger an `AttributeError`. Confirms the existing rule: the poll thread only ever marshals UI work via `after()`/badge updates, never touches the Win32 menu directly.
+- **Tray/Tk race hardened.** `desktop_widget.refresh()` (called from the poll thread) now snapshots the window reference under its lock before `.after()`, so a concurrent `hide()` on the UI thread can't trigger an `AttributeError`. Confirms the existing rule: the poll thread only ever marshals UI work via `after()`/badge updates, never touches the Win32 menu directly. *(Superseded by the single Tk root above.)*
 
 ### Auth coverage (auth_discovery.py, token_reader.py, accounts.py, main.py)
 

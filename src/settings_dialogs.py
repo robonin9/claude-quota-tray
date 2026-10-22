@@ -1,21 +1,24 @@
 """
 Tkinter dialogs for editing user settings that don't fit in a tray
-sub-menu (accounts, custom thresholds, schedule). Each dialog is opened
-on its own thread so the tray icon stays responsive.
+sub-menu (accounts, custom thresholds, schedule). Each dialog is a
+Toplevel of the shared root on the ui_host thread.
 
-A simple `on_saved` callback is invoked after each successful save so the
-caller can refresh menus / force a poll.
+A simple `on_saved` callback is invoked (on the UI thread) after each
+successful save so the caller can flag a refresh.
 """
 
 from __future__ import annotations
 
+import sys
 import threading
 import tkinter as tk
+import traceback
 from tkinter import filedialog, messagebox
 from typing import Callable, Optional
 
 import accounts
 import settings as user_settings
+import ui_host
 from bar_widget import ui_font
 from i18n import t
 
@@ -28,41 +31,44 @@ _BTN_BG = "#2d2d2d"
 _BTN_BG_ACTIVE = "#3a3a3a"
 _ENTRY_BG = "#262626"
 
-_dialog_lock = threading.Lock()
-_open_dialogs: dict[str, tk.Tk] = {}
+# Only touched on the UI thread.
+_open_dialogs: dict[str, tk.Toplevel] = {}
 
 
-def _spawn(kind: str, builder: Callable[[tk.Tk], None]) -> None:
-    """Run a Tk dialog on its own thread and dedupe by kind."""
-    with _dialog_lock:
-        existing = _open_dialogs.get(kind)
-        if existing is not None:
-            try:
-                existing.lift()
-                existing.focus_force()
-                return
-            except tk.TclError:
-                _open_dialogs.pop(kind, None)
+def _spawn(kind: str, builder: Callable[[tk.Toplevel], None]) -> None:
+    """Open a dialog on the UI thread, or focus the one already open."""
+    ui_host.call(_open_dialog, kind, builder)
 
-    def _worker():
-        root = tk.Tk()
-        root.configure(bg=_BG)
-        with _dialog_lock:
-            _open_dialogs[kind] = root
 
-        def _on_close():
-            with _dialog_lock:
-                _open_dialogs.pop(kind, None)
-            try:
-                root.destroy()
-            except tk.TclError:
-                pass
+def _open_dialog(kind: str, builder: Callable[[tk.Toplevel], None]) -> None:
+    existing = _open_dialogs.get(kind)
+    if existing is not None and existing.winfo_exists():
+        existing.deiconify()
+        existing.lift()
+        existing.focus_force()
+        return
+    _open_dialogs.pop(kind, None)
 
-        root.protocol("WM_DELETE_WINDOW", _on_close)
+    root = tk.Toplevel(ui_host.root())
+    root.configure(bg=_BG)
+    _open_dialogs[kind] = root
+
+    def _forget():
+        if _open_dialogs.get(kind) is root:
+            _open_dialogs.pop(kind, None)
+
+    ui_host.on_destroy(root, _forget)
+    try:
         builder(root)
-        root.mainloop()
+    except Exception:
+        sys.stderr.write(f"\n[settings_dialogs] building {kind!r} failed\n")
+        traceback.print_exc(file=sys.stderr)
+        root.destroy()
 
-    threading.Thread(target=_worker, daemon=True).start()
+
+def _in_background(fn: Callable[[], None]) -> None:
+    """Run slow follow-up work (downloads, launching .bat) off the UI thread."""
+    threading.Thread(target=fn, daemon=True).start()
 
 
 def _styled_button(parent, text, command, *, primary=False):
@@ -101,7 +107,7 @@ def open_accounts(on_saved: Callable[[], None]) -> None:
     _spawn("accounts", lambda root: _build_accounts(root, on_saved))
 
 
-def _build_accounts(root: tk.Tk, on_saved: Callable[[], None]) -> None:
+def _build_accounts(root: tk.Toplevel, on_saved: Callable[[], None]) -> None:
     root.title(t('dialog.accounts_title'))
     root.geometry("560x420")
 
@@ -155,15 +161,16 @@ def _build_accounts(root: tk.Tk, on_saved: Callable[[], None]) -> None:
         acct = _selected_account()
         if not acct:
             messagebox.showinfo(t('dialog.accounts_remove_title'),
-                                t('dialog.accounts_no_selection'))
+                                t('dialog.accounts_no_selection'), parent=root)
             return
         if len(accounts.list_accounts()) <= 1:
             messagebox.showwarning(t('dialog.accounts_remove_title'),
-                                   t('dialog.accounts_keep_one'))
+                                   t('dialog.accounts_keep_one'), parent=root)
             return
         if not messagebox.askyesno(
                 t('dialog.accounts_remove_title'),
-                t('dialog.accounts_remove_confirm', name=acct.get('name'))):
+                t('dialog.accounts_remove_confirm', name=acct.get('name')),
+                parent=root):
             return
         accounts.remove_account(acct["id"])
         _refresh_list()
@@ -173,7 +180,7 @@ def _build_accounts(root: tk.Tk, on_saved: Callable[[], None]) -> None:
         acct = _selected_account()
         if not acct:
             messagebox.showinfo(t('dialog.accounts_rename'),
-                                t('dialog.accounts_no_selection'))
+                                t('dialog.accounts_no_selection'), parent=root)
             return
         new_name = _prompt_string(root, t('dialog.accounts_rename_title'),
                                   t('dialog.accounts_rename_label'),
@@ -197,7 +204,7 @@ def _build_accounts(root: tk.Tk, on_saved: Callable[[], None]) -> None:
     _styled_button(btn_row, t('common.close'), root.destroy).pack(side="right")
 
 
-def _open_add_account(parent: tk.Tk, on_added: Callable[[], None],
+def _open_add_account(parent: tk.Toplevel, on_added: Callable[[], None],
                       on_saved: Callable[[], None]) -> None:
     dlg = tk.Toplevel(parent)
     dlg.title(t('dialog.accounts_add_title'))
@@ -253,7 +260,7 @@ def _open_add_account(parent: tk.Tk, on_added: Callable[[], None],
         path = path_var.get().strip() or None
         if mode == "file" and not path:
             messagebox.showwarning(t('dialog.accounts_add_title'),
-                                   t('dialog.accounts_missing_path'))
+                                   t('dialog.accounts_missing_path'), parent=dlg)
             return
         accounts.add_account(name, mode, path)
         on_added()
@@ -266,7 +273,7 @@ def _open_add_account(parent: tk.Tk, on_added: Callable[[], None],
         side="right", padx=(0, 8))
 
 
-def _prompt_string(parent: tk.Tk, title: str, label: str,
+def _prompt_string(parent: tk.Toplevel, title: str, label: str,
                    initial: str = "") -> Optional[str]:
     dlg = tk.Toplevel(parent)
     dlg.title(title)
@@ -311,7 +318,7 @@ def open_schedule(on_saved: Callable[[], None]) -> None:
     _spawn("schedule", lambda root: _build_schedule(root, on_saved))
 
 
-def _build_schedule(root: tk.Tk, on_saved: Callable[[], None]) -> None:
+def _build_schedule(root: tk.Toplevel, on_saved: Callable[[], None]) -> None:
     root.title(t('dialog.schedule_title'))
     root.geometry("440x360")
 
@@ -396,7 +403,7 @@ def open_thresholds(on_saved: Callable[[], None]) -> None:
     _spawn("thresholds", lambda root: _build_thresholds(root, on_saved))
 
 
-def _build_thresholds(root: tk.Tk, on_saved: Callable[[], None]) -> None:
+def _build_thresholds(root: tk.Toplevel, on_saved: Callable[[], None]) -> None:
     root.title(t('dialog.thresholds_title'))
     root.geometry("420x320")
 
@@ -443,7 +450,7 @@ def _build_thresholds(root: tk.Tk, on_saved: Callable[[], None]) -> None:
         week = _parse(var_w.get())
         if sess is None or week is None:
             messagebox.showwarning(t('dialog.thresholds_heading'),
-                                   t('dialog.thresholds_invalid'))
+                                   t('dialog.thresholds_invalid'), parent=root)
             return
         user_settings.update(
             thresholds=sess,
@@ -461,7 +468,7 @@ def _build_thresholds(root: tk.Tk, on_saved: Callable[[], None]) -> None:
 
 
 def open_update_source(on_saved: Optional[Callable[[], None]] = None) -> None:
-    def _build(root: tk.Tk) -> None:
+    def _build(root: tk.Toplevel) -> None:
         import config
 
         cur = user_settings.get("update_github_repo") or config.DEFAULT_UPDATE_REPO
@@ -490,6 +497,7 @@ def open_update_source(on_saved: Optional[Callable[[], None]] = None) -> None:
                 messagebox.showwarning(
                     t('dialog.update_source_heading'),
                     t('dialog.update_source_invalid'),
+                    parent=root,
                 )
                 return
             user_settings.update(update_github_repo=raw)
@@ -506,7 +514,7 @@ def open_update_source(on_saved: Optional[Callable[[], None]] = None) -> None:
 
 
 def confirm_apply_update(on_confirm: Callable[[], None]) -> None:
-    def _build(root: tk.Tk) -> None:
+    def _build(root: tk.Toplevel) -> None:
         import config
 
         repo = user_settings.get("update_github_repo") or config.DEFAULT_UPDATE_REPO
@@ -518,13 +526,13 @@ def confirm_apply_update(on_confirm: Callable[[], None]) -> None:
         )
         root.destroy()
         if ok:
-            on_confirm()
+            _in_background(on_confirm)
 
     _spawn("apply_update_confirm", _build)
 
 
 def confirm_uninstall(on_confirm: Callable[[], None]) -> None:
-    def _build(root: tk.Tk) -> None:
+    def _build(root: tk.Toplevel) -> None:
         root.withdraw()
         ok = messagebox.askyesno(
             t('menu.run_uninstall'),
@@ -533,7 +541,7 @@ def confirm_uninstall(on_confirm: Callable[[], None]) -> None:
         )
         root.destroy()
         if ok:
-            on_confirm()
+            _in_background(on_confirm)
 
     _spawn("uninstall_confirm", _build)
 
@@ -546,7 +554,7 @@ def open_connect_claude(on_saved: Callable[[], None]) -> None:
     _spawn("connect_claude", lambda root: _build_connect_claude(root, on_saved))
 
 
-def _build_connect_claude(root: tk.Tk, on_saved: Callable[[], None]) -> None:
+def _build_connect_claude(root: tk.Toplevel, on_saved: Callable[[], None]) -> None:
     import token_store
 
     root.title(t('connect.title'))
@@ -554,7 +562,8 @@ def _build_connect_claude(root: tk.Tk, on_saved: Callable[[], None]) -> None:
     root.minsize(480, 360)
     try:
         root.attributes("-topmost", True)
-        root.after(600, lambda: root.attributes("-topmost", False))
+        ui_host.after(600, lambda: root.winfo_exists()
+                      and root.attributes("-topmost", False))
     except tk.TclError:
         pass
 
@@ -620,9 +629,11 @@ def _build_connect_claude(root: tk.Tk, on_saved: Callable[[], None]) -> None:
                 token_var.set(found)
                 status.set(t('connect.found'))
                 status_lbl.configure(fg=_ACCENT)
-        root.after(700, _poll_clipboard)
+        ui_host.after(700, _poll_clipboard)
 
     def _finish_ok(token: str):
+        if not root.winfo_exists():
+            return
         try:
             token_store.save_token(token)
         except Exception as e:
@@ -639,9 +650,11 @@ def _build_connect_claude(root: tk.Tk, on_saved: Callable[[], None]) -> None:
         status.set(t('connect.saved'))
         status_lbl.configure(fg="#22c55e")
         on_saved()
-        root.after(1200, root.destroy)
+        ui_host.after(1200, lambda: root.winfo_exists() and root.destroy())
 
     def _finish_fail(msg: str):
+        if not root.winfo_exists():
+            return
         state["busy"] = False
         status.set(msg)
         status_lbl.configure(fg="#ef4444")
@@ -662,15 +675,15 @@ def _build_connect_claude(root: tk.Tk, on_saved: Callable[[], None]) -> None:
             try:
                 snap = fetch_usage(token)
             except Exception as e:  # never leave the dialog stuck "verifying"
-                root.after(0, lambda: _finish_fail(t('connect.verify_failed', msg=str(e)[:150])))
+                ui_host.call(_finish_fail, t('connect.verify_failed', msg=str(e)[:150]))
                 return
             if snap.ok or snap.has_data:
-                root.after(0, lambda: _finish_ok(token))
+                ui_host.call(_finish_ok, token)
             elif snap.http_status in (401, 403):
-                root.after(0, lambda: _finish_fail(t('connect.rejected')))
+                ui_host.call(_finish_fail, t('connect.rejected'))
             else:
                 err = (snap.error or "unknown")[:150]
-                root.after(0, lambda: _finish_fail(t('connect.verify_failed', msg=err)))
+                ui_host.call(_finish_fail, t('connect.verify_failed', msg=err))
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -685,4 +698,4 @@ def _build_connect_claude(root: tk.Tk, on_saved: Callable[[], None]) -> None:
         _styled_button(btn_row, t('connect.disconnect'), _do_disconnect).pack(side="left")
 
     entry.bind("<Return>", lambda _e: _do_save())
-    root.after(300, _poll_clipboard)
+    ui_host.after(300, _poll_clipboard)

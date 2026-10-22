@@ -21,6 +21,7 @@
 **Windows 10 / 11 (แนะนำ)** — ฟีเจอร์ครบ: toast (`windows-toasts`), desktop widget, Setup/Update `.bat`, startup shortcut
 
 **macOS 13+ (เบต้า)** — tray + poll + history จาก source (`scripts/setup_mac.sh`) หรือ `.app` unsigned จาก [Releases](../../releases) (อาจต้องคลิกขวา → Open ครั้งแรก) — ดู [docs/SIGNING.md](docs/SIGNING.md)
+> ข้อจำกัด: บน macOS ทั้ง Tk และ AppKit ต้องรันบน main thread ซึ่งตอนนี้ pystray ใช้อยู่ หน้าต่างต่างๆ (popup / history / dialog) บน Mac จึงยังเป็นเบต้าและอาจไม่เสถียร
 
 การ sign `.exe` บน Windows (optional): [docs/SIGNING.md](docs/SIGNING.md) — ต้องมี OV/EV `.pfx` ของ maintainer
 
@@ -176,6 +177,8 @@ claude-quota-tray/
 │   ├── notifications.py    ← Windows toast (windows-toasts) + pystray fallback
 │   ├── bar_widget.py       ← shared Tk progress-bar + compact bar (widget)
 │   ├── chart_widget.py     ← กราฟ history (area fill + hover tooltip)
+│   ├── ui_host.py          ← Tk root ตัวเดียว + เธรด UI กลาง (ทุกหน้าต่างเป็น Toplevel; เธรดอื่นส่งงานผ่าน call/call_sync)
+│   ├── tray_icon.py        ← pystray Icon ที่สร้างเมนูใหม่ทุกครั้งที่คลิกขวา (เมนูสดเสมอ)
 │   ├── status_window.py    ← compact popup (left-click) + ปุ่ม open history
 │   ├── history_window.py   ← หน้าต่าง history: กราฟ Session/Weekly + toggle 24h/7d/30d + CSV
 │   ├── desktop_widget.py   ← แถบ quota ลอยบนจอ always-on-top (Windows)
@@ -186,7 +189,7 @@ claude-quota-tray/
 │   ├── app_platform.py     ← facade เลือก platform_win / platform_darwin
 │   ├── platform_win.py     ← Windows: single-instance, AUMID, launch ฯลฯ
 │   └── platform_darwin.py  ← macOS: single-instance, launch helpers
-├── tests/                  ← unittest suite (api, auth fallback, history, features)
+├── tests/                  ← unittest suite (api, auth fallback, history, features, ui_host, tray menu)
 ├── Setup claude quota tray.bat     ← installer (1-click; ชี้ .exe ถ้ามี ไม่งั้น pythonw)
 ├── Run claude quota tray.bat       ← manual launcher (เลือก dist\ClaudeQuotaTray.exe ก่อน)
 ├── Update claude quota tray.bat    ← refresh deps + restart app
