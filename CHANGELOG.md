@@ -11,6 +11,18 @@ All notable changes to this fork are documented here.
 
 Changes compared to upstream v0.2.0. Tray UI, polling, history, and notifications are otherwise the same unless noted.
 
+### Security: signed updates (2026-10) — breaking for releases
+
+- **In-app updates are verified before anything is installed.** Releases must include `SHA256SUMS` (a `version: X.Y.Z` line plus `<sha256>  <file>` lines) and `SHA256SUMS.sig`, an **Ed25519** signature over the whole file by a key in `src/update_keys.py`. The updater checks the signature, that the signed version equals the tag and is newer than the installed version, and the downloaded file's SHA-256 (constant-time compare) — and only then extracts / moves anything. A failed `.exe` download is deleted.
+- **No downgrades, no pre-releases.** A signed but older release set as "latest" is refused (`UpdateNotNewerError`). Versions must be plain `X.Y.Z`: previously `0.4.0-rc1` compared equal to `0.4.0`.
+- **GitHub's auto-generated zipball is no longer used** (it can't be covered by the signature). Asset downloads must start at `https://github.com/<owner>/<repo>/releases/download/` for the configured repo, and redirects must stay on HTTPS.
+- **"Update available" only for installable releases.** `check_for_update` downloads and verifies `SHA256SUMS`/`.sig` first; a newer release without them reports *unsigned* instead of offering an update that would then fail. New toasts (en/th): `toast.update_unsigned`, `toast.update_verify_failed`, `toast.update_not_newer`.
+- **The tray app no longer vanishes on a refused update.** In source mode it verifies before quitting for the updater, and `update_runner.py --apply` restarts the tray app even when the update fails.
+- **Release workflow publishes once, fully signed.** Build jobs upload artifacts only; a final job writes and signs `SHA256SUMS`, verifies it against `src/update_keys.py`, and creates the release with all files at once — no window where a release exists without its signature. A `guard` job requires a `vX.Y.Z` tag equal to `config.APP_VERSION`. Manual runs (`workflow_dispatch`) are dry runs that upload the signed files as an artifact. Fixed the existing `if: ${{ secrets... }}` (not allowed by GitHub) on the code-signing step.
+- **Breaking:** releases without `SHA256SUMS` + `SHA256SUMS.sig` cannot be installed from the app or `Update claude quota tray.bat`. Maintainers must create a key and the `UPDATE_SIGNING_KEY` secret first — `scripts/gen_update_key.py`, `scripts/sign_release.py`, see `docs/SIGNING.md`.
+- Known limitation: `pip install -r requirements.txt` (Setup, source updates) is not hash-pinned yet — see `SECURITY.md`.
+- Tests: `tests/test_updater_verify.py` (tampering, wrong key, missing files, version mismatch, downgrade, pre-release, foreign repo, HTTP redirect, and the CI signing script round-trip).
+
 ### Added: CI and `--self-test` (2026-10)
 
 - **`python src/main.py --self-test`** opens the tray icon and every window (status, history, desktop widget, accounts, thresholds, connect) against fake usage data, checks that only one Tk root was created, and exits `0` pass / `1` fail / `2` hung (30 s watchdog). It uses a temporary data folder, never calls the API and never reads a token, so it is safe to run next to the real app — and lets people with a Mac report results we can't reproduce. `CQT_SELFTEST_SCREENSHOT=<dir>` saves a screenshot.

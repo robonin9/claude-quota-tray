@@ -129,13 +129,15 @@ build.bat
 
 | รายการ | ทำอะไร |
 |--------|--------|
-| **Check for updates** | เทียบเวอร์ชันกับ GitHub Releases |
-| **Install latest release…** | ดาวน์โหลด zip source (หรือ `.exe`) แล้วอัปเดต — แอปปิดแล้วรีสตาร์ทเอง |
+| **Check for updates** | เทียบเวอร์ชันกับ GitHub Releases — แจ้งว่ามีอัปเดตเฉพาะเมื่อ release ใหม่กว่า **และ** ตรวจลายเซ็นผ่านแล้ว |
+| **Install latest release…** | ดาวน์โหลด zip source (หรือ `.exe`) **ตรวจลายเซ็น + เวอร์ชัน + hash ก่อน** ถ้าผ่านจึงติดตั้งแล้วรีสตาร์ท — ถ้าไม่ผ่านจะไม่แตะไฟล์ใดๆ |
 | **Update source (GitHub repo)…** | ตั้ง repo เช่น `robonin9/claude-quota-tray` หรือ URL เต็ม |
 | **Run Setup / Update / Uninstall** | เปิด `.bat` ในโฟลเดอร์ติดตั้ง (โหมด source + `.venv`) |
 
 - ค่า repo เก็บใน `settings.json` คีย์ `update_github_repo` (ว่าง = ใช้ `config.DEFAULT_UPDATE_REPO`)
-- Release บน GitHub ควรมี asset **source `.zip`** (CI สร้างให้ตอน tag) หรือ **`ClaudeQuotaTray.exe`** สำหรับโหมด exe อย่างเดียว
+- Release บน GitHub **ต้องมี** asset (source `.zip` หรือ `ClaudeQuotaTray.exe`) **พร้อม `SHA256SUMS` และ `SHA256SUMS.sig`** ซึ่ง `release.yml` สร้างและเซ็นให้ตอน push tag `vX.Y.Z` — zip ที่ GitHub สร้างอัตโนมัติ (zipball) ใช้ไม่ได้แล้ว เพราะไม่มีลายเซ็น
+- แอป **ไม่ลดเวอร์ชันและไม่ติดตั้ง pre-release**: เวอร์ชันที่เซ็นไว้ใน `SHA256SUMS` ต้องตรงกับ tag และต้องใหม่กว่าเวอร์ชันที่ติดตั้งอยู่
+- **Fork / Update source ที่ชี้ไป repo อื่น** ต้องใส่ public key ของตัวเองใน `src/update_keys.py` (ดู [docs/SIGNING.md](docs/SIGNING.md)) ไม่อย่างนั้นการตรวจลายเซ็นจะไม่ผ่าน
 - ทดสอบจากเทอร์มินัล: `python src/update_runner.py --check`
 
 ## การตั้งค่า
@@ -197,13 +199,14 @@ claude-quota-tray/
 │   ├── history_window.py   ← หน้าต่าง history: กราฟ Session/Weekly + toggle 24h/7d/30d + CSV
 │   ├── desktop_widget.py   ← แถบ quota ลอยบนจอ always-on-top (Windows)
 │   ├── settings_dialogs.py ← Tk dialogs (Manage accounts, Schedule, Thresholds)
-│   ├── updater.py          ← เทียบเวอร์ชัน + ดึง GitHub Releases
-│   ├── update_runner.py    ← `python src/update_runner.py --check` (CLI)
+│   ├── updater.py          ← ดึง GitHub Releases + ตรวจ SHA256SUMS ที่เซ็น Ed25519 (เวอร์ชัน, hash) ก่อนติดตั้ง
+│   ├── update_keys.py      ← public key ที่ใช้ตรวจลายเซ็นอัปเดต (ว่าง = ปฏิเสธทุกอัปเดต)
+│   ├── update_runner.py    ← `python src/update_runner.py --check` / `--apply` (CLI)
 │   ├── app_paths.py        ← path helpers (settings/history/log)
 │   ├── app_platform.py     ← facade เลือก platform_win / platform_darwin
 │   ├── platform_win.py     ← Windows: single-instance, AUMID, launch ฯลฯ
 │   └── platform_darwin.py  ← macOS: single-instance, launch helpers
-├── tests/                  ← unittest suite (api, auth fallback, history, features, ui_host, tray menu)
+├── tests/                  ← unittest suite (api, auth fallback, history, features, ui_host, tray menu, signed updates)
 ├── Setup claude quota tray.bat     ← installer (1-click; ชี้ .exe ถ้ามี ไม่งั้น pythonw)
 ├── Run claude quota tray.bat       ← manual launcher (เลือก dist\ClaudeQuotaTray.exe ก่อน)
 ├── Update claude quota tray.bat    ← refresh deps + restart app
@@ -212,14 +215,17 @@ claude-quota-tray/
 │   └── app.ico             ← Start menu / .exe icon (regenerate via scripts/generate_app_icon.py)
 ├── scripts/
 │   ├── generate_app_icon.py
+│   ├── gen_update_key.py   ← สร้างคู่คีย์ Ed25519 สำหรับเซ็นอัปเดต (private key เก็บนอก repo)
+│   ├── sign_release.py     ← สร้าง / เซ็น / ตรวจ SHA256SUMS (ใช้ใน release.yml)
 │   └── setup_mac.sh
 ├── docs/
-│   └── SIGNING.md          ← การ sign .exe (OV/EV) + แนวทาง macOS
+│   └── SIGNING.md          ← การเซ็นอัปเดต (บังคับ) + การ sign .exe (OV/EV, optional) + แนวทาง macOS
 ├── requirements.txt
 ├── requirements-dev.txt    ← PyInstaller ฯลฯ สำหรับ build
 ├── build.bat / build.sh    ← PyInstaller build scripts (--icon assets/app.ico)
 └── .github/workflows/
-    └── release.yml         ← auto-build .exe + .app ตอน git tag
+    ├── ci.yml              ← unit tests + --self-test บน Windows/macOS ทุกครั้งที่ push
+    └── release.yml         ← tag vX.Y.Z → build .exe + .app + source zip, เซ็น SHA256SUMS แล้วสร้าง release ครบทุกไฟล์ทีเดียว
 ```
 
 ## ที่อยู่ของข้อมูลในเครื่อง
@@ -251,6 +257,7 @@ Windows 11 ซ่อนไอคอน tray ของแอปใหม่ๆ �
 - แอปนี้ **อ่าน** OAuth token เท่านั้น ไม่ส่งไปไหนนอกจาก `api.anthropic.com` (HTTPS)
 - ไม่เก็บ token ลง settings.json หรือ history.db — เก็บแค่ path ของ credentials file
 - History database เก็บแค่ตัวเลข % กับ timestamp ไม่มีข้อมูล sensitive
+- อัปเดตในแอปติดตั้งเฉพาะไฟล์ที่ตรวจลายเซ็น (Ed25519), เวอร์ชัน และ hash ผ่านแล้ว — ไม่ลดเวอร์ชัน ไม่รับ pre-release
 - Source code เปิดให้ดูได้ทั้งหมด
 
 นโยบายความปลอดภัยฉบับเต็ม + วิธีรายงานช่องโหว่: [SECURITY.md](SECURITY.md)

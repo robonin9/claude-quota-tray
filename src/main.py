@@ -839,6 +839,18 @@ def action_check_update(icon, item):
                 t("toast.update_error", msg=result.error[:180]),
             )
             return
+        if result.unsigned and result.latest:
+            notifications.notify(
+                icon, config.APP_NAME,
+                t("toast.update_unsigned", version=result.latest.version),
+            )
+            return
+        if result.verify_error:
+            notifications.notify(
+                icon, config.APP_NAME,
+                t("toast.update_verify_failed", msg=result.verify_error[:160]),
+            )
+            return
         if result.latest and result.update_available:
             notifications.notify(
                 icon,
@@ -861,17 +873,43 @@ def action_check_update(icon, item):
     threading.Thread(target=work, daemon=True).start()
 
 
+def _notify_update_refused(icon: pystray.Icon, err: Exception) -> None:
+    key = ("toast.update_not_newer" if isinstance(err, updater.UpdateNotNewerError)
+           else "toast.update_verify_failed")
+    notifications.notify(icon, config.APP_NAME, t(key, msg=str(err)[:160]))
+
+
 def _spawn_apply_update_and_quit(icon: pystray.Icon) -> None:
     root = app_paths.project_root()
     script = app_paths.update_runner_script()
     py = app_paths.venv_python()
-    if py and script.is_file():
-        popen_kw: dict = {"cwd": root, "close_fds": True, **app_platform.detached_popen_kwargs()}
-        subprocess.Popen([str(py), str(script), "--apply"], **popen_kw)
-        action_quit(icon, None)
-        return
 
     def work():
+        if py and script.is_file():
+            # Verify before quitting: the runner would refuse a bad release
+            # anyway, but the user would only see the tray icon vanish.
+            result = updater.check_for_update(_update_repo_spec())
+            if not result.update_available:
+                if result.unsigned and result.latest:
+                    notifications.notify(icon, config.APP_NAME, t(
+                        "toast.update_unsigned", version=result.latest.version))
+                elif result.verify_error:
+                    notifications.notify(icon, config.APP_NAME, t(
+                        "toast.update_verify_failed", msg=result.verify_error[:160]))
+                elif result.error:
+                    notifications.notify(icon, config.APP_NAME, t(
+                        "toast.update_error", msg=result.error[:180]))
+                elif result.latest:
+                    notifications.notify(icon, config.APP_NAME, t(
+                        "toast.update_up_to_date", version=result.latest.version))
+                else:
+                    notifications.notify(icon, config.APP_NAME, t("toast.update_no_releases"))
+                return
+            popen_kw: dict = {"cwd": root, "close_fds": True,
+                              **app_platform.detached_popen_kwargs()}
+            subprocess.Popen([str(py), str(script), "--apply"], **popen_kw)
+            action_quit(icon, None)
+            return
         try:
             msg = updater.apply_update(
                 root,
@@ -883,6 +921,8 @@ def _spawn_apply_update_and_quit(icon: pystray.Icon) -> None:
             )
             if "after you quit" in msg.lower():
                 action_quit(icon, None)
+        except updater.UpdateVerificationError as e:
+            _notify_update_refused(icon, e)
         except Exception as e:
             notifications.notify(
                 icon, config.APP_NAME, t("toast.update_error", msg=str(e)[:180])

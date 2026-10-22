@@ -33,6 +33,10 @@ pyinstaller \
     --hidden-import platform_win \
     --hidden-import platform_darwin \
     --hidden-import token_store \
+    --hidden-import ui_host \
+    --hidden-import tray_icon \
+    --hidden-import self_test \
+    --hidden-import update_keys \
     --collect-submodules Crypto \
     src/main.py
 

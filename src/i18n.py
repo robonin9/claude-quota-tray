@@ -175,6 +175,9 @@ _T: dict[str, dict[str, str]] = {
         "toast.update_up_to_date": "Up to date (v{version})",
         "toast.update_no_releases": "No releases published yet on this repo.",
         "toast.update_applied": "Update: {msg}",
+        "toast.update_unsigned": "v{version} is out, but it has no signature (SHA256SUMS.sig), so it can't be installed from the app.",
+        "toast.update_verify_failed": "Update refused — verification failed: {msg}",
+        "toast.update_not_newer": "Update refused: the latest release is not newer than this version ({msg}).",
 
         "dialog.update_source_title": "Claude Quota — Update source",
         "dialog.update_source_heading": "GitHub repository",
@@ -438,6 +441,9 @@ _T: dict[str, dict[str, str]] = {
         "toast.update_up_to_date": "เป็นเวอร์ชันล่าสุดแล้ว (v{version})",
         "toast.update_no_releases": "repo นี้ยังไม่มี release เผยแพร่",
         "toast.update_applied": "อัปเดต: {msg}",
+        "toast.update_unsigned": "มี v{version} แล้ว แต่ไม่มีลายเซ็น (SHA256SUMS.sig) จึงติดตั้งจากในแอปไม่ได้",
+        "toast.update_verify_failed": "ไม่ติดตั้งอัปเดต — ตรวจสอบไม่ผ่าน: {msg}",
+        "toast.update_not_newer": "ไม่ติดตั้งอัปเดต: release ล่าสุดไม่ใหม่กว่าเวอร์ชันนี้ ({msg})",
 
         "dialog.update_source_title": "Claude Quota — แหล่งอัปเดต",
         "dialog.update_source_heading": "GitHub repository",
