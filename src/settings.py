@@ -8,6 +8,7 @@ values can change at runtime via the tray menu and survive across restarts.
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 import uuid
@@ -15,8 +16,29 @@ from pathlib import Path
 from typing import Any, Dict
 
 
+# Point every data file (settings, history, error.log, token fallback) at a
+# different folder — used by --self-test and CI so they never touch real data.
+DATA_DIR_ENV = "CQT_DATA_DIR"
+
+# Defaults when CQT_DATA_DIR is unset. Read at call time (not import time) by
+# the functions below, so tests can patch them.
 SETTINGS_DIR = Path.home() / ".claude-quota-tray"
 SETTINGS_PATH = SETTINGS_DIR / "settings.json"
+
+
+def data_dir() -> Path:
+    override = os.environ.get(DATA_DIR_ENV, "").strip()
+    return Path(override).expanduser() if override else SETTINGS_DIR
+
+
+def settings_path() -> Path:
+    if os.environ.get(DATA_DIR_ENV, "").strip():
+        return data_dir() / "settings.json"
+    return SETTINGS_PATH
+
+
+def error_log_path() -> Path:
+    return data_dir() / "error.log"
 
 _lock = threading.RLock()
 _cache: Dict[str, Any] | None = None
@@ -97,20 +119,21 @@ def load() -> Dict[str, Any]:
     with _lock:
         if _cache is not None:
             return _cache
-        SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
-        if SETTINGS_PATH.exists():
+        path = settings_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
             try:
-                with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+                with open(path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 data = _migrate(data)
             except (OSError, json.JSONDecodeError):
                 # Keep the unreadable file instead of silently overwriting the
                 # user's accounts/thresholds with defaults.
                 try:
-                    backup = SETTINGS_PATH.with_name(
+                    backup = path.with_name(
                         f"settings.corrupt-{int(time.time())}.json"
                     )
-                    SETTINGS_PATH.replace(backup)
+                    path.replace(backup)
                 except OSError:
                     pass
                 data = _defaults()
@@ -129,11 +152,12 @@ def save(data: Dict[str, Any] | None = None) -> None:
             data = _cache
         if data is None:
             return
-        SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
-        tmp = SETTINGS_PATH.with_suffix(".tmp")
+        path = settings_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        tmp.replace(SETTINGS_PATH)
+        tmp.replace(path)
         _cache = data
 
 

@@ -18,6 +18,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+if "--self-test" in sys.argv:
+    # Before the imports below: some of them read settings at import time.
+    import self_test
+    self_test.prepare_data_dir()
+
 import pystray
 
 import app_paths
@@ -595,7 +600,7 @@ def action_refresh(icon, item):
 
 def _log_action_error(where: str) -> None:
     try:
-        log = Path.home() / ".claude-quota-tray" / "error.log"
+        log = user_settings.error_log_path()
         log.parent.mkdir(parents=True, exist_ok=True)
         with open(log, "a", encoding="utf-8") as f:
             f.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] {where}\n")
@@ -610,7 +615,7 @@ def _log_info(message: str) -> None:
     Used for noteworthy-but-not-fatal events (e.g. an OAuth token rotation
     that we recovered from) so they can be confirmed after the fact."""
     try:
-        log = Path.home() / ".claude-quota-tray" / "error.log"
+        log = user_settings.error_log_path()
         log.parent.mkdir(parents=True, exist_ok=True)
         with open(log, "a", encoding="utf-8") as f:
             f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
@@ -675,7 +680,7 @@ def action_show_error(icon, item):
 
 
 def action_open_error_log(icon, item):
-    log = Path.home() / ".claude-quota-tray" / "error.log"
+    log = user_settings.error_log_path()
     log.parent.mkdir(parents=True, exist_ok=True)
     if not log.exists():
         log.write_text("", encoding="utf-8")
@@ -1000,7 +1005,7 @@ def _export_summary(icon, days: int, filename: str) -> None:
                     t('toast.summary_retention', days=days + 1),
                 )
 
-            out = user_settings.SETTINGS_DIR / filename
+            out = user_settings.data_dir() / filename
             result = history.export_period_summary(
                 out,
                 state.active_account["name"],
@@ -1586,7 +1591,7 @@ def _redirect_stderr_to_log() -> None:
     a file so we can see unhandled tracebacks instead of the process
     silently disappearing."""
     try:
-        log_path = Path.home() / ".claude-quota-tray" / "error.log"
+        log_path = user_settings.error_log_path()
         log_path.parent.mkdir(parents=True, exist_ok=True)
         stream = open(log_path, "a", encoding="utf-8", buffering=1)
         sys.stderr = stream
@@ -1599,6 +1604,13 @@ def _redirect_stderr_to_log() -> None:
 
 
 def main():
+    if "--self-test" in sys.argv:
+        # First thing: self_test points CQT_DATA_DIR at a temp folder before
+        # anything touches settings, history or the log; no single-instance
+        # lock, so it can run next to the real app.
+        import self_test
+        sys.exit(self_test.run(sys.modules[__name__]))
+
     if sys.platform == "win32":
         try:
             app_platform.set_app_identity(config.WIN_APP_USER_MODEL_ID)

@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    # macOS windows still run Tk off pystray's main thread (known limitation);
+    # report the result without blocking merges until the macOS follow-up.
+    continue-on-error: ${{ matrix.os == 'macos-latest' }}
+    timeout-minutes: 15
+    env:
+      CQT_DATA_DIR: ${{ github.workspace }}/.ci-data
+      CQT_SELFTEST_SCREENSHOT: ${{ github.workspace }}/.ci-shots
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Unit tests
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+
+      - name: Self-test (opens every window + tray icon with fake data)
+        timeout-minutes: 3
+        run: python src/main.py --self-test
+
+      - name: Upload log and screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest-${{ matrix.os }}
+          path: |
+            .ci-data/error.log
+            .ci-shots/
+          if-no-files-found: ignore

@@ -149,7 +149,8 @@ def _mac_delete() -> None:
 # --- File fallback ---------------------------------------------------------
 
 def _file_path() -> Path:
-    return Path.home() / ".claude-quota-tray" / "token"
+    import settings as user_settings
+    return user_settings.data_dir() / "token"
 
 
 def _file_save(token: str) -> None:

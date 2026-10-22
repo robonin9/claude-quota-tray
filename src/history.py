@@ -15,10 +15,12 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from settings import SETTINGS_DIR
+import settings as user_settings
 
 
-DB_PATH = SETTINGS_DIR / "history.db"
+def db_path() -> Path:
+    return user_settings.data_dir() / "history.db"
+
 
 _lock = threading.RLock()
 _conn: Optional[sqlite3.Connection] = None
@@ -27,9 +29,10 @@ _conn: Optional[sqlite3.Connection] = None
 def _connect() -> sqlite3.Connection:
     global _conn
     if _conn is None:
-        SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+        path = db_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
         _conn = sqlite3.connect(
-            str(DB_PATH), check_same_thread=False, timeout=10.0
+            str(path), check_same_thread=False, timeout=10.0
         )
         # WAL keeps the chart window's reads from blocking the poller's writes;
         # busy_timeout lets a brief lock resolve itself instead of erroring.

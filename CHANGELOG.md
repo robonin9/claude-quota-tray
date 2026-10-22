@@ -11,6 +11,12 @@ All notable changes to this fork are documented here.
 
 Changes compared to upstream v0.2.0. Tray UI, polling, history, and notifications are otherwise the same unless noted.
 
+### Added: CI and `--self-test` (2026-10)
+
+- **`python src/main.py --self-test`** opens the tray icon and every window (status, history, desktop widget, accounts, thresholds, connect) against fake usage data, checks that only one Tk root was created, and exits `0` pass / `1` fail / `2` hung (30 s watchdog). It uses a temporary data folder, never calls the API and never reads a token, so it is safe to run next to the real app — and lets people with a Mac report results we can't reproduce. `CQT_SELFTEST_SCREENSHOT=<dir>` saves a screenshot.
+- **`CQT_DATA_DIR`** moves every data file (settings, history, `error.log`, token fallback) to another folder. Paths are resolved when used, not at import (`settings.data_dir()`, `settings_path()`, `error_log_path()`, `history.db_path()`), replacing five hard-coded `error.log` paths.
+- **CI** (`.github/workflows/ci.yml`): unit tests + `--self-test` on `windows-latest` and `macos-latest` for every push and pull request; uploads `error.log` and the screenshot as artifacts. The macOS job is report-only (`continue-on-error`) until the macOS main-thread follow-up lands.
+
 ### Stability: one Tk root, live tray menu (2026-10)
 
 - **All windows share one Tk root on one UI thread** (`src/ui_host.py`). Status popup, history window, desktop widget and every settings dialog — including *Connect Claude account* — were each a separate `tk.Tk()` running `mainloop()` on its own thread, which crashes Tcl at random on Windows (`Tcl_AsyncDelete: async handler deleted by the wrong thread`). They are now `Toplevel`s of a single hidden root; other threads hand work over with `ui_host.call()` / `call_sync()` and never touch Tk, not even `.after()`. `call_sync()` from the UI thread runs inline, so a window button calling back into the app cannot deadlock. Tk objects are released on the UI thread when the app quits.

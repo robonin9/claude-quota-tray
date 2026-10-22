@@ -30,7 +30,8 @@ SnapshotFetcher = Callable[[], dict]
 
 def _log_error(where: str) -> None:
     try:
-        log = Path.home() / ".claude-quota-tray" / "error.log"
+        import settings as user_settings
+        log = user_settings.error_log_path()
         log.parent.mkdir(parents=True, exist_ok=True)
         with open(log, "a", encoding="utf-8") as f:
             f.write(
