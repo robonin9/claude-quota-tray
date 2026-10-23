@@ -24,11 +24,14 @@ jobs:
       CQT_DATA_DIR: ${{ github.workspace }}/.ci-data
       CQT_SELFTEST_SCREENSHOT: ${{ github.workspace }}/.ci-shots
       PYTHONIOENCODING: utf-8
+      # Flush test output line by line so a crash (e.g. a Tk abort) still
+      # leaves the last test name in the log.
+      PYTHONUNBUFFERED: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -38,18 +41,39 @@ jobs:
           pip install -r requirements.txt
 
       - name: Unit tests
-        run: python -m unittest discover -s tests -p "test_*.py" -v
+        id: unit
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests -p "test_*.py" -v 2>&1 | tee unittest.log
 
+      # Logs need a GitHub login; annotations are public. Surface failures there.
+      - name: Report unit tests
+        if: always() && steps.unit.outcome == 'failure'
+        run: python scripts/ci_annotate.py unittest.log --level error --title "unit tests (${{ matrix.os }})"
+
+      # Runs even if the unit tests failed, so every runner reports a result.
       - name: Self-test (opens every window + tray icon with fake data)
+        id: selftest
+        if: always()
         timeout-minutes: 3
-        run: python src/main.py --self-test
+        shell: bash
+        run: |
+          set -o pipefail
+          python src/main.py --self-test 2>&1 | tee selftest.log
+
+      - name: Report self-test
+        if: always() && steps.selftest.outcome != 'skipped'
+        run: python scripts/ci_annotate.py selftest.log --level ${{ steps.selftest.outcome == 'success' && 'notice' || 'error' }} --title "self-test (${{ matrix.os }})"
 
       - name: Upload log and screenshot
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: selftest-${{ matrix.os }}
           path: |
             .ci-data/error.log
             .ci-shots/
+            unittest.log
+            selftest.log
           if-no-files-found: ignore

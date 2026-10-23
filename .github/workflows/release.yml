@@ -19,7 +19,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check tag format and APP_VERSION
         id: version
@@ -51,10 +51,10 @@ jobs:
       # secrets can't be referenced in `if:` directly; expose a flag instead.
       HAS_CERT: ${{ secrets.WINDOWS_CERT_PFX != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -82,7 +82,7 @@ jobs:
       # Must stay after "Sign executable": SHA256SUMS is computed from this
       # artifact, so it has to be the exact (signed) file users download.
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows
           path: dist/ClaudeQuotaTray.exe
@@ -92,10 +92,10 @@ jobs:
     needs: guard
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -114,7 +114,7 @@ jobs:
           zip -r ClaudeQuotaTray-macos.zip ClaudeQuotaTray.app || zip -r ClaudeQuotaTray-macos.zip ClaudeQuotaTray
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos
           path: dist/ClaudeQuotaTray-macos.zip
@@ -126,7 +126,7 @@ jobs:
     env:
       VERSION: ${{ needs.guard.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build source bundle
         run: |
@@ -142,7 +142,7 @@ jobs:
           zip -r "${OUT}.zip" "$OUT"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: source
           path: claude-quota-tray-v*.zip
@@ -160,7 +160,7 @@ jobs:
       VERSION: ${{ needs.guard.outputs.version }}
       UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Require the update signing key
         run: |
@@ -170,7 +170,7 @@ jobs:
           fi
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -178,7 +178,7 @@ jobs:
         run: pip install "pycryptodome>=3.20.0"
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-files
           merge-multiple: true
@@ -195,14 +195,14 @@ jobs:
 
       - name: Upload dry-run output
         if: github.event_name != 'push'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dry-run-release
           path: release-files/
 
       - name: Create GitHub Release (all files at once)
         if: github.event_name == 'push'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             release-files/ClaudeQuotaTray.exe

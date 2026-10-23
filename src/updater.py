@@ -310,13 +310,17 @@ def verify_release(sums: bytes, sig: bytes, release: ReleaseInfo,
     return entries
 
 
-def verify_asset(path: Path, expected_sha256: str) -> None:
+def verify_asset(path: Path, expected_sha256: str, name: Optional[str] = None) -> None:
+    """``name`` is the release asset name for messages (``path`` may be a
+    temp/staging file such as ``release.zip`` or ``….exe.new``)."""
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     if not hmac.compare_digest(h.hexdigest(), (expected_sha256 or "").lower()):
-        raise UpdateVerificationError(f"{path.name} does not match its signed SHA-256")
+        raise UpdateVerificationError(
+            f"{name or path.name} does not match its signed SHA-256"
+        )
 
 
 def _fetch_signature_files(release: ReleaseInfo) -> tuple[bytes, bytes]:
@@ -422,7 +426,7 @@ def apply_source_update(project_dir: Path, release: ReleaseInfo,
         tmp_path = Path(tmp)
         zip_path = tmp_path / "release.zip"
         _download(release.source_zip_url, zip_path)
-        verify_asset(zip_path, expected)
+        verify_asset(zip_path, expected, release.source_zip_name)
         extract_dir = tmp_path / "extract"
         extract_dir.mkdir()
         with zipfile.ZipFile(zip_path, "r") as zf:
@@ -454,7 +458,7 @@ def apply_exe_update(project_dir: Path, release: ReleaseInfo,
     staging = project_dir / f"{release.exe_name}.new"
     try:
         _download(release.exe_url, staging)
-        verify_asset(staging, expected)
+        verify_asset(staging, expected, release.exe_name)
     except BaseException:
         staging.unlink(missing_ok=True)
         raise
