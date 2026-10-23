@@ -9,6 +9,13 @@ All notable changes to this fork are documented here.
 
 ## [Unreleased]
 
+### macOS: Tk owns the main thread
+
+- **Windows open on macOS.** Tk and AppKit both require the main thread, which pystray used to own, so any window on a Mac could abort the app. Now `ui_host.run_forever(on_ready=...)` runs Tk on the main thread, and the menu-bar icon is created in `on_ready` with pystray's `run_detached()` — it shares Tk's `NSApplication`, so one event loop drives both. Tray updates from the poll thread are re-queued to the main thread (rebuilding the menu, since macOS has no rebuild-on-open hook). On macOS `ui_host.call()` never starts a background Tk thread.
+- **Quit / Restart on macOS** hide the status item and end the UI loop instead of `icon.stop()` (which would stop Tk's `NSApp`).
+- **No Dock icon:** set at runtime (`NSApplicationActivationPolicyAccessory`) and `LSUIElement` in the `.app`.
+- **macOS CI now blocks merges** (unit tests + `--self-test` on `macos-latest`); the worker-thread `ui_host` tests are Windows-only, and `tests/test_ui_host_main.py` covers the main-thread host on both OSes. Still beta until someone runs it on a real Mac.
+
 ### Security: hash-pinned dependencies
 
 - **Every dependency is installed with `pip install --require-hashes`** from a lock file with exact versions and SHA-256 hashes: `requirements.lock` (Setup, `scripts/setup_mac.sh`, source-mode in-app updates, CI), `requirements-dev.lock` (release builds, incl. PyInstaller) and `requirements-sign.lock` (the CI signing job). One universal lock covers Windows, macOS and Python 3.9+ (`uv pip compile --universal --generate-hashes`, via `scripts/lock_requirements.py`). `requirements.txt` stays the hand-edited source.
@@ -56,7 +63,7 @@ First release signed for in-app updates (see *Security: signed updates* below an
 - **Confirming an update or uninstall no longer freezes all windows** while it downloads / launches the script.
 - **Copy status to clipboard** uses the shared root instead of creating a throwaway `tk.Tk()`.
 - Tests: `tests/test_ui_host.py`, `tests/test_tray_icon.py`.
-- **Known limitation (macOS):** Tk and AppKit both need the main thread on macOS, which pystray currently owns, so windows on macOS remain beta. `ui_host.run_forever()` exists for a follow-up that lets Tk own the main thread with `icon.run_detached()`.
+- **Known limitation (macOS):** Tk and AppKit both need the main thread on macOS, which pystray currently owns, so windows on macOS remain beta. `ui_host.run_forever()` exists for a follow-up that lets Tk own the main thread with `icon.run_detached()`. *(Resolved in 0.6.0, see above.)*
 
 ### Review fixes (2026-10)
 

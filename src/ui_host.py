@@ -6,8 +6,9 @@ Tk directly (not even ``.after()``); they hand work over with ``call()`` /
 ``call_sync()`` and the UI thread drains that queue on a timer.
 
 On Windows the UI thread is a background thread started by ``start()``.
-``run_forever()`` runs the same loop on the calling thread instead, for
-platforms where Tk must own the main thread.
+On macOS Tk (and AppKit) must own the main thread, so the app calls
+``run_forever(on_ready=...)`` from the main thread instead; there ``call()``
+never starts a background Tk thread on its own.
 """
 
 from __future__ import annotations
@@ -29,6 +30,11 @@ _root: Optional[tk.Tk] = None
 _ui_thread: Optional[threading.Thread] = None
 _started = False
 _stopping = False
+_failed = False  # Tk could not be initialised
+
+# A Tk on a background thread is fatal on macOS, so call() may only start
+# one lazily elsewhere; on macOS the app must use run_forever().
+_AUTO_START = sys.platform != "darwin"
 
 
 class _SyncResult:
@@ -59,19 +65,30 @@ def start(timeout: float = 5.0) -> bool:
     return is_alive()
 
 
-def run_forever() -> None:
-    """Run the Tk loop on the calling thread until ``shutdown()``."""
+def run_forever(on_ready: Optional[Callable[[], Any]] = None) -> None:
+    """Run the Tk loop on the calling thread until ``shutdown()``.
+
+    ``on_ready`` runs on this thread once Tk is up, before anything queued
+    with ``call()`` — the place to create objects that must live on the UI
+    thread (on macOS: the status-bar icon).
+    """
     global _started
     with _lock:
         if _started:
             raise RuntimeError("ui_host is already running")
         _started = True
-    _run()
+    _run(on_ready)
 
 
-def _run() -> None:
+def _run(on_ready: Optional[Callable[[], Any]] = None) -> None:
     if not _bootstrap():
+        _release_pending("Tk could not be initialised")
         return
+    if on_ready is not None:
+        try:
+            on_ready()
+        except Exception:
+            _log_exception("on_ready")
     try:
         _root.mainloop()
     except Exception:
@@ -81,7 +98,7 @@ def _run() -> None:
 
 
 def _bootstrap() -> bool:
-    global _root, _ui_thread
+    global _root, _ui_thread, _failed
     _ui_thread = threading.current_thread()
     try:
         root = tk.Tk()
@@ -89,6 +106,7 @@ def _bootstrap() -> bool:
         root.report_callback_exception = _report_callback_exception
     except Exception:
         _log_exception("Tk init failed")
+        _failed = True
         _ready.set()
         return False
     _root = root
@@ -139,14 +157,18 @@ def _teardown() -> None:
     # handler deleted by the wrong thread".
     tk._default_root = None
     gc.collect()
-    # Release anyone still waiting on a call that will never run.
+    _release_pending("ui_host stopped")
+
+
+def _release_pending(reason: str) -> None:
+    """Fail anyone still waiting on a call that will never run."""
     while True:
         try:
             _fn, _a, _kw, result = _queue.get_nowait()
         except queue.Empty:
             break
         if result is not None:
-            result.error = RuntimeError("ui_host stopped")
+            result.error = RuntimeError(reason)
             result.event.set()
 
 
@@ -196,11 +218,19 @@ def on_destroy(win: tk.Misc, fn: Callable[[], None]) -> None:
     win.bind("<Destroy>", _handler, add="+")
 
 
+def _accepting() -> bool:
+    """Can work be queued? Yes while Tk is up, or still starting up (it is
+    drained once ready). Off macOS, the first call starts the UI thread."""
+    if not _started and _AUTO_START:
+        start()
+    if not _started or _stopping or _failed:
+        return False
+    return _root is not None or not _ready.is_set()
+
+
 def call(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> bool:
     """Run ``fn`` on the UI thread later. Returns False if Tk is unavailable."""
-    if not _started:
-        start()
-    if not is_alive():
+    if not _accepting():
         return False
     _queue.put((fn, args, kwargs, None))
     return True
@@ -215,9 +245,7 @@ def call_sync(fn: Callable[..., Any], *args: Any,
     """
     if is_ui_thread():
         return fn(*args, **kwargs)
-    if not _started:
-        start()
-    if not is_alive():
+    if not _accepting():
         raise RuntimeError("ui_host is not running")
     result = _SyncResult()
     _queue.put((fn, args, kwargs, result))
@@ -226,6 +254,17 @@ def call_sync(fn: Callable[..., Any], *args: Any,
     if result.error is not None:
         raise result.error
     return result.value
+
+
+def _reset_for_tests() -> None:
+    """Forget a host that has fully stopped, so a test can start another."""
+    global _started, _stopping, _failed, _root, _ui_thread
+    if _root is not None:
+        raise RuntimeError("ui_host is still running")
+    _release_pending("reset")
+    _started = _stopping = _failed = False
+    _ui_thread = None
+    _ready.clear()
 
 
 def shutdown(timeout: float = 2.0) -> None:

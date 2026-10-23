@@ -111,6 +111,10 @@ def detached_popen_kwargs() -> dict:
     }
 
 
+def hide_dock_icon() -> None:
+    """macOS only; nothing to do on Windows."""
+
+
 def set_app_identity(app_user_model_id: str) -> None:
     """Separate this app from generic pythonw.exe in the taskbar and toasts."""
     try:

@@ -6,6 +6,7 @@ how a platform that needs Tk on the main thread would drive it.
 
 import os
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -32,6 +33,10 @@ def _counting_init(self, *args, **kwargs):
 
 def setUpModule():
     global _ui_thread, _tmp
+    if sys.platform == "darwin":
+        # These tests host Tk on a worker thread, which AppKit aborts on.
+        # macOS is covered by test_ui_host_main.py and `main.py --self-test`.
+        raise unittest.SkipTest("Tk must own the main thread on macOS")
     if ui_host._started:
         raise unittest.SkipTest("ui_host already started by another test")
     _tmp = tempfile.mkdtemp(prefix="cqt-test-")
@@ -59,6 +64,7 @@ def tearDownModule():
         ui_host.shutdown()
     if _ui_thread is not None:
         _ui_thread.join(timeout=5)
+    ui_host._reset_for_tests()
     if history._conn is not None:
         history._conn.close()
     if _saved["env"] is None:

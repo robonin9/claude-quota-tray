@@ -180,10 +180,8 @@ def _tray(app, ui_host, box) -> str:
     ready = threading.Event()
 
     def make():
-        icon = app.TrayIcon(
-            "claude-quota-selftest", icon=render_icon(42), title="self-test",
-            menu=app.build_menu(),
-        )
+        icon = app._make_tray_icon()  # the same icon + menu the app builds
+        icon.icon = render_icon(42)
         icon.run_detached(setup=lambda _icon: ready.set())
         return icon
 
@@ -202,6 +200,10 @@ def _tray(app, ui_host, box) -> str:
         ui_host.call_sync(show, icon, timeout=10)
     else:
         show(icon)
+    # What the poll thread does: update the icon from a non-UI thread (on
+    # macOS this is re-queued to the main thread), then let it run.
+    app._apply_tray_update(icon)
+    ui_host.call_sync(lambda: None, timeout=10)
     return type(icon).__name__
 
 

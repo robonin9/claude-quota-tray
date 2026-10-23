@@ -23,7 +23,7 @@
 **Windows 10 / 11 (แนะนำ)** — ฟีเจอร์ครบ: toast (`windows-toasts`), desktop widget, Setup/Update `.bat`, startup shortcut
 
 **macOS 13+ (เบต้า)** — tray + poll + history จาก source (`scripts/setup_mac.sh`) หรือ `.app` unsigned จาก [Releases](../../releases) (อาจต้องคลิกขวา → Open ครั้งแรก) — ดู [docs/SIGNING.md](docs/SIGNING.md)
-> ข้อจำกัด: บน macOS ทั้ง Tk และ AppKit ต้องรันบน main thread ซึ่งตอนนี้ pystray ใช้อยู่ หน้าต่างต่างๆ (popup / history / dialog) บน Mac จึงยังเป็นเบต้าและอาจไม่เสถียร
+> ตั้งแต่ 0.6.0 บน macOS ให้ Tk เป็นเจ้าของ main thread และไอคอนบน menu bar ใช้ event loop เดียวกับ Tk (ไม่มีไอคอนใน Dock) หน้าต่างต่างๆ (popup / history / dialog) จึงเปิดได้แล้ว — CI ทดสอบบน macOS ทุกครั้งที่ push (unit tests + `--self-test`) แต่ยังเป็น **เบต้า** จนกว่าจะมีคนใช้บน Mac จริง และยังไม่มี desktop widget
 >
 > **มี Mac? ช่วยทดสอบได้:** รัน `python3 src/main.py --self-test` แล้วแนบผลที่พิมพ์ออกมา (และ `error.log` ถ้ามี) มาใน [issue](https://github.com/robonin9/claude-quota-tray/issues) — คำสั่งนี้ใช้ข้อมูลจำลองในโฟลเดอร์ชั่วคราว ไม่แตะ token หรือ settings จริง
 
@@ -207,7 +207,7 @@ claude-quota-tray/
 │   ├── app_paths.py        ← path helpers (settings/history/log)
 │   ├── app_platform.py     ← facade เลือก platform_win / platform_darwin
 │   ├── platform_win.py     ← Windows: single-instance, AUMID, launch ฯลฯ
-│   └── platform_darwin.py  ← macOS: single-instance, launch helpers
+│   └── platform_darwin.py  ← macOS: single-instance, launch helpers, ซ่อนไอคอน Dock
 ├── tests/                  ← unittest suite (api, auth fallback, history, features, ui_host, tray menu, signed updates)
 ├── Setup claude quota tray.bat     ← installer (1-click; ชี้ .exe ถ้ามี ไม่งั้น pythonw)
 ├── Run claude quota tray.bat       ← manual launcher (เลือก dist\ClaudeQuotaTray.exe ก่อน)
