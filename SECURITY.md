@@ -7,11 +7,12 @@ fork, so please always run the most recent version before reporting an issue.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.5.x   | :white_check_mark: |
-| < 0.5   | :x:                |
+| 0.6.x   | :white_check_mark: |
+| < 0.6   | :x:                |
 
 0.5.0 is this fork's first release with signed in-app updates; earlier
-versions install updates without verification, so upgrade to 0.5.x manually.
+versions install updates without verification, so upgrade to 0.5.0 or later
+manually.
 (This fork skipped 0.4.0 because upstream already released a different 0.4.0.)
 
 ## How the app handles your credentials

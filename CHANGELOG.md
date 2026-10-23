@@ -9,6 +9,10 @@ All notable changes to this fork are documented here.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-23 — fork (robonin9)
+
+Signed with the same key as 0.5.0, so the in-app update from 0.5.0 installs it (`.exe` users: see *Upgrading from 0.5.0 still uses 0.5.0's script* below). macOS support is still beta.
+
 ### macOS: Tk owns the main thread
 
 - **Windows open on macOS.** Tk and AppKit both require the main thread, which pystray used to own, so any window on a Mac could abort the app. Now `ui_host.run_forever(on_ready=...)` runs Tk on the main thread, and the menu-bar icon is created in `on_ready` with pystray's `run_detached()` — it shares Tk's `NSApplication`, so one event loop drives both. Tray updates from the poll thread are re-queued to the main thread (rebuilding the menu, since macOS has no rebuild-on-open hook). On macOS `ui_host.call()` never starts a background Tk thread.
