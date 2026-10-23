@@ -1,0 +1,2 @@
+# CI release job only (Linux): signs SHA256SUMS. Locked in requirements-sign.lock.
+pycryptodome>=3.20.0

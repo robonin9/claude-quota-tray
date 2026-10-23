@@ -54,7 +54,7 @@
 |------|---------|-------|-----------|
 | **Setup + source** (แนะนำ) | ผู้ใช้ทั่วไป, กลัว antivirus | ดับเบิ้ลคลิก `Setup claude quota tray.bat` — ติด Python + venv ให้เอง | หลัง `build.bat` ให้รัน Setup อีกครั้งเพื่อไอคอน taskbar สวย |
 | **.exe จาก Releases** | อยากย้ายแค่ไฟล์เดียว | ไม่ต้องมี Python บนเครื่อง | Defender อาจเตือน unknown publisher → More info → Run anyway |
-| **Build เอง** | นักพัฒนา / fork | ควบคุมเวอร์ชันและ sign ได้ | ต้องมี Python + `requirements-dev.txt` |
+| **Build เอง** | นักพัฒนา / fork | ควบคุมเวอร์ชันและ sign ได้ | ต้องมี Python + `requirements-dev.lock` (ติดตั้งด้วย `--require-hashes`) |
 
 ### ขั้นตอนติดตั้งแบบแนะนำ (Windows)
 

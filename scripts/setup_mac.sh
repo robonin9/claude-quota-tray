@@ -4,6 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -U pip
-pip install -r requirements.txt
+# requirements.lock pins exact versions + SHA-256 hashes; pip refuses mismatches.
+# (No `pip install -U pip`: that download would not be hash-checked.)
+pip install --require-hashes -r requirements.lock
 echo "Done. Run: source .venv/bin/activate && python src/main.py"

@@ -9,6 +9,13 @@ All notable changes to this fork are documented here.
 
 ## [Unreleased]
 
+### Security: hash-pinned dependencies
+
+- **Every dependency is installed with `pip install --require-hashes`** from a lock file with exact versions and SHA-256 hashes: `requirements.lock` (Setup, `scripts/setup_mac.sh`, source-mode in-app updates, CI), `requirements-dev.lock` (release builds, incl. PyInstaller) and `requirements-sign.lock` (the CI signing job). One universal lock covers Windows, macOS and Python 3.9+ (`uv pip compile --universal --generate-hashes`, via `scripts/lock_requirements.py`). `requirements.txt` stays the hand-edited source.
+- Setup and `setup_mac.sh` no longer self-upgrade pip (that download wasn't hash-checked; the bundled pip supports `--require-hashes`).
+- The release source zip now includes `requirements.lock`; it's covered by the signed `SHA256SUMS`, so an update's dependency hashes are as trusted as its code. The very first update from 0.5.0 still installs from `requirements.txt` (it runs 0.5.0's updater).
+- CI job `lock-fresh` fails if `requirements*.txt` changed without regenerating the locks.
+
 ### Fixed / maintenance
 
 - **Update errors name the real file.** A refused download now says e.g. `claude-quota-tray-v0.5.0.zip does not match its signed SHA-256` instead of the temp name `release.zip` / `ClaudeQuotaTray.exe.new`.

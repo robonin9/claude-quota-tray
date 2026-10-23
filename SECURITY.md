@@ -84,11 +84,16 @@ will never move to an older one).
 
 ## Known limitations
 
-- **Python dependencies are not hash-pinned.** Source-mode updates and
-  `Setup claude quota tray.bat` run `pip install -r requirements.txt`, which
-  fetches packages from PyPI without hash verification. The app's own files are
-  verified; its dependencies rely on PyPI and HTTPS. A future hardening step is
-  a hashed `requirements.lock` installed with `pip install --require-hashes`.
+- **Python dependencies are hash-pinned (since 0.6.0).** `requirements.lock`
+  lists every package with an exact version and SHA-256 hashes;
+  `Setup claude quota tray.bat`, `scripts/setup_mac.sh`, source-mode updates and
+  CI install it with `pip install --require-hashes`, so pip refuses any file
+  that doesn't match. Release builds use `requirements-dev.lock` (incl.
+  PyInstaller) and the signing job `requirements-sign.lock`. Because the lock
+  ships inside the signed source zip, its hashes are covered by the release
+  signature. Remaining gaps: the first update *from 0.5.0* still runs 0.5.0's
+  updater, which installs from `requirements.txt` without hashes (later updates
+  use the lock), and `pip` itself is whatever the local Python bundles.
 - **Manual updates are not verified automatically.** If you replace files by
   hand, compare them against the release's `SHA256SUMS` yourself (for example
   `certutil -hashfile <file> SHA256` on Windows).
