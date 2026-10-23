@@ -142,6 +142,10 @@ build.bat
 - **Fork / Update source ที่ชี้ไป repo อื่น** ต้องใส่ public key ของตัวเองใน `src/update_keys.py` (ดู [docs/SIGNING.md](docs/SIGNING.md)) ไม่อย่างนั้นการตรวจลายเซ็นจะไม่ผ่าน
 - ทดสอบจากเทอร์มินัล: `python src/update_runner.py --check`
 
+**ถ้ารันจาก `.exe`:** หลังกดยืนยัน แอปจะดาวน์โหลด `ClaudeQuotaTray.exe.new` มาตรวจ แสดง toast "Update will apply after you quit the app." แล้วปิดตัวเอง จากนั้น `Apply Claude Quota Tray update.bat` จะสลับไฟล์และเปิดแอปใหม่ ตั้งแต่ 0.6.0 สคริปต์จะลองสลับไฟล์ซ้ำนานสุด 30 วินาที (ไฟล์ `.exe` อาจยังถูกล็อกอยู่สักพักหลังแอปปิด) ถ้าสลับไม่สำเร็จจะเก็บ `.new` กับสคริปต์ไว้ให้รันซ้ำ และบันทึกลง `error.log`
+
+> **อัปเดตจาก 0.5.0 หรือ 0.6.0:** ไฟล์ใหม่จะถูกสลับเข้าที่แล้ว แต่ตอนเปิดแอปใหม่อาจขึ้นกล่อง *"Failed to load Python DLL …\_MEI…\python312.dll"* ให้กด OK แล้วเปิด Claude Quota Tray เองอีกครั้ง (แก้แล้วใน 0.6.1 ใช้ได้กับการอัปเดตครั้งถัดไปเป็นต้นไป) ถ้าหลังจากนั้นยังมี `ClaudeQuotaTray.exe.new` ค้างข้าง `.exe` ให้ Quit แอปแล้วรัน `move /y ClaudeQuotaTray.exe.new ClaudeQuotaTray.exe` ในโฟลเดอร์นั้น — ไฟล์ `.new` ผ่านการตรวจลายเซ็นแล้ว
+
 ## การตั้งค่า
 
 คลิกขวาที่ icon → **Settings**:
@@ -208,7 +212,7 @@ claude-quota-tray/
 │   ├── app_platform.py     ← facade เลือก platform_win / platform_darwin
 │   ├── platform_win.py     ← Windows: single-instance, AUMID, launch ฯลฯ
 │   └── platform_darwin.py  ← macOS: single-instance, launch helpers, ซ่อนไอคอน Dock
-├── tests/                  ← unittest suite (api, auth fallback, history, features, ui_host, tray menu, signed updates)
+├── tests/                  ← unittest suite (api, auth fallback, history, features, ui_host, tray menu, signed updates, .exe swap script)
 ├── Setup claude quota tray.bat     ← installer (1-click; ชี้ .exe ถ้ามี ไม่งั้น pythonw)
 ├── Run claude quota tray.bat       ← manual launcher (เลือก dist\ClaudeQuotaTray.exe ก่อน)
 ├── Update claude quota tray.bat    ← refresh deps + restart app
