@@ -119,7 +119,7 @@ python scripts/generate_app_icon.py   # สร้าง assets/app.ico (ถ้�
 build.bat
 ```
 
-**แก้ dependency:** แก้ `requirements.txt` / `requirements-dev.txt` (ไฟล์ที่คนแก้) แล้วสร้างไฟล์ lock ใหม่ด้วย `pip install uv==<UV_VERSION ใน scripts/lock_requirements.py>` + `python scripts/lock_requirements.py` แล้ว commit ไฟล์ `*.lock` ไปด้วย — CI (`lock-fresh`) จะ fail ถ้าลืม
+**แก้ dependency:** แก้ `requirements.txt` / `requirements-dev.txt` (ไฟล์ที่คนแก้) แล้วสร้างไฟล์ lock ใหม่ด้วย `pip install uv==<UV_VERSION ใน scripts/lock_requirements.py>` + `python scripts/lock_requirements.py` แล้ว commit ไฟล์ `*.lock` ไปด้วย — CI (`lock-fresh`) จะ fail ถ้าลืม สคริปต์คงเวอร์ชันเดิมใน lock ไว้ (แพ็กเกจออกเวอร์ชันใหม่ไม่ทำให้ CI แดง) ถ้าจะอัปเดตทุกตัวเป็นเวอร์ชันล่าสุดให้ใช้ `python scripts/lock_requirements.py --upgrade`
 
 ไฟล์ผลลัพธ์จะอยู่ที่ `dist/ClaudeQuotaTray.exe` (~30 MB) พร้อมไอคอนจาก `assets/app.ico`
 
