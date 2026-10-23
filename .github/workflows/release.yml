@@ -58,11 +58,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
+      - name: Install dependencies (hash-checked, incl. PyInstaller)
+        run: pip install --require-hashes -r requirements-dev.lock
 
       - name: Build
         run: .\build.bat
@@ -99,11 +96,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
+      - name: Install dependencies (hash-checked, incl. PyInstaller)
+        run: pip install --require-hashes -r requirements-dev.lock
 
       - name: Build
         run: chmod +x build.sh && ./build.sh
@@ -137,7 +131,7 @@ jobs:
                 "Setup claude quota tray.bat" \
                 "Update claude quota tray.bat" \
                 "Uninstall claude quota tray.bat" \
-                requirements.txt README.md CHANGELOG.md LICENSE \
+                requirements.txt requirements.lock README.md CHANGELOG.md LICENSE \
                 "$OUT/"
           zip -r "${OUT}.zip" "$OUT"
 
@@ -174,8 +168,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install pycryptodome
-        run: pip install "pycryptodome>=3.20.0"
+      - name: Install pycryptodome (hash-checked)
+        run: pip install --require-hashes -r requirements-sign.lock
 
       - name: Download build artifacts
         uses: actions/download-artifact@v8

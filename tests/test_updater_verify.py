@@ -27,12 +27,14 @@ OWNER, REPO = "owner", "repo"
 BASE = f"https://github.com/{OWNER}/{REPO}/releases/download"
 
 
-def _zip_source(version: str, marker: str) -> bytes:
+def _zip_source(version: str, marker: str, with_lock: bool = False) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         root = f"claude-quota-tray-v{version}"
         zf.writestr(f"{root}/src/main.py", f"# {marker}\n")
         zf.writestr(f"{root}/requirements.txt", "")
+        if with_lock:
+            zf.writestr(f"{root}/requirements.lock", "# hashed\n")
     return buf.getvalue()
 
 
@@ -146,6 +148,26 @@ class SignedUpdateTests(unittest.TestCase):
         self.assertIn("ClaudeQuotaTray.exe", msg)
         self.assertEqual((self.project / "ClaudeQuotaTray.exe").read_bytes(),
                          b"MZ new exe 0.4.0")
+
+    def test_source_update_installs_deps_from_the_hashed_lock(self):
+        # Rebuild the fixture so the signed source zip carries a lock file.
+        self.make_release()
+        zip_url = next(u for u in self.files if u.endswith(".zip") and "claude-quota-tray" in u)
+        new_zip = _zip_source("0.4.0", "new 0.4.0", with_lock=True)
+        self.files[zip_url] = new_zip
+        sums_url = next(u for u in self.files if u.endswith("/SHA256SUMS"))
+        sums = (f"version: 0.4.0\n{_sha(new_zip)}  claude-quota-tray-v0.4.0.zip\n").encode()
+        self.files[sums_url] = sums
+        self.files[sums_url + ".sig"] = self.sign(sums)
+
+        venv_py = self.project / ".venv" / "Scripts" / "python.exe"
+        venv_py.parent.mkdir(parents=True)
+        venv_py.write_bytes(b"")
+        with mock.patch.object(updater.subprocess, "run") as run:
+            self.assertEqual(self.apply(), "Updated to v0.4.0")
+        cmd = run.call_args.args[0]
+        self.assertIn("--require-hashes", cmd)
+        self.assertEqual(cmd[cmd.index("-r") + 1], str(self.project / "requirements.lock"))
 
     # --- tampering --------------------------------------------------------
 
@@ -320,6 +342,29 @@ class SignedUpdateTests(unittest.TestCase):
             sign_release.cmd_sums("0.4.0", out / "SHA256SUMS", [out / "a.zip"])
             sign_release.cmd_sign(out / "SHA256SUMS", out / "SHA256SUMS.sig")
         self.assertEqual(sign_release.cmd_verify(out / "SHA256SUMS", out / "SHA256SUMS.sig"), 1)
+
+
+class PipInstallCommandTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp(prefix="cqt-pip-"))
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.py = self.dir / "python.exe"
+
+    def test_lock_is_installed_with_require_hashes(self):
+        (self.dir / "requirements.lock").write_text("x")
+        (self.dir / "requirements.txt").write_text("x")
+        cmd = updater.pip_install_command(self.py, self.dir)
+        self.assertIn("--require-hashes", cmd)
+        self.assertEqual(cmd[-2:], ["-r", str(self.dir / "requirements.lock")])
+
+    def test_falls_back_to_requirements_txt_without_lock(self):
+        (self.dir / "requirements.txt").write_text("x")
+        cmd = updater.pip_install_command(self.py, self.dir)
+        self.assertNotIn("--require-hashes", cmd)
+        self.assertEqual(cmd[-2:], ["-r", str(self.dir / "requirements.txt")])
+
+    def test_nothing_to_install(self):
+        self.assertIsNone(updater.pip_install_command(self.py, self.dir))
 
 
 if __name__ == "__main__":

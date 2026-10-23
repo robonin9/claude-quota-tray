@@ -436,15 +436,26 @@ def apply_source_update(project_dir: Path, release: ReleaseInfo,
 
     venv_py = project_dir / ".venv" / "Scripts" / "python.exe"
     if venv_py.is_file():
-        req = project_dir / "requirements.txt"
-        if req.is_file():
-            subprocess.run(
-                [str(venv_py), "-m", "pip", "install", "-r", str(req), "--quiet",
-                 "--disable-pip-version-check"],
-                cwd=project_dir,
-                check=True,
-            )
+        cmd = pip_install_command(venv_py, project_dir)
+        if cmd:
+            subprocess.run(cmd, cwd=project_dir, check=True)
     return f"Updated to {release.tag}"
+
+
+def pip_install_command(python: Path, project_dir: Path) -> Optional[list[str]]:
+    """Install dependencies, hash-checked when requirements.lock is present.
+
+    The lock came out of the release zip, which was verified against the
+    signed SHA256SUMS, so its hashes are trustworthy.
+    """
+    base = [str(python), "-m", "pip", "install", "--quiet", "--disable-pip-version-check"]
+    lock = project_dir / "requirements.lock"
+    if lock.is_file():
+        return base + ["--require-hashes", "-r", str(lock)]
+    req = project_dir / "requirements.txt"
+    if req.is_file():
+        return base + ["-r", str(req)]
+    return None
 
 
 def apply_exe_update(project_dir: Path, release: ReleaseInfo,

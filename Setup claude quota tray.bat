@@ -95,20 +95,23 @@ REM ==================================================================
 REM [3/4] Install dependencies
 REM ==================================================================
 echo [3/4] Installing dependencies (may take ~30 sec)...
-"%VENV_PY%" -m pip install --upgrade pip --quiet --disable-pip-version-check
-if errorlevel 1 (
-    echo   [ERROR] Failed to upgrade pip.
-    pause
-    exit /b 1
+REM requirements.lock pins every package to an exact version and SHA-256 hash;
+REM pip refuses anything that doesn't match. (No pip self-upgrade: that
+REM download would not be hash-checked, and the bundled pip is new enough.)
+set "REQ_FILE=%PROJECT_DIR%\requirements.lock"
+set "REQ_FLAGS=--require-hashes"
+if not exist "%REQ_FILE%" (
+    set "REQ_FILE=%PROJECT_DIR%\requirements.txt"
+    set "REQ_FLAGS="
 )
-"%VENV_PY%" -m pip install -r "%PROJECT_DIR%\requirements.txt" --quiet --disable-pip-version-check
+"%VENV_PY%" -m pip install %REQ_FLAGS% -r "%REQ_FILE%" --quiet --disable-pip-version-check
 if errorlevel 1 (
     echo   [ERROR] Failed to install dependencies.
     echo   Try running this script again, or check your internet connection.
     pause
     exit /b 1
 )
-echo   Installed packages from requirements.txt ^(incl. pycryptodome on Windows^)
+echo   Installed hash-checked packages ^(incl. pycryptodome on Windows^)
 echo.
 
 REM ==================================================================

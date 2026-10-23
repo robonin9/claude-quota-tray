@@ -97,7 +97,7 @@ python -m venv .venv
 .venv\Scripts\activate          # Windows
 # source .venv/bin/activate     # macOS / Linux
 
-pip install -r requirements.txt
+pip install --require-hashes -r requirements.lock   # เวอร์ชัน + hash ล็อกไว้ทุกตัว
 python src/main.py
 ```
 
@@ -114,10 +114,12 @@ python src/main.py --self-test         # เปิดทุกหน้าต่
 
 ```bash
 .venv\Scripts\activate
-pip install -r requirements-dev.txt
+pip install --require-hashes -r requirements-dev.lock   # รวม PyInstaller
 python scripts/generate_app_icon.py   # สร้าง assets/app.ico (ถ้ายังไม่มี)
 build.bat
 ```
+
+**แก้ dependency:** แก้ `requirements.txt` / `requirements-dev.txt` (ไฟล์ที่คนแก้) แล้วสร้างไฟล์ lock ใหม่ด้วย `pip install uv==<UV_VERSION ใน scripts/lock_requirements.py>` + `python scripts/lock_requirements.py` แล้ว commit ไฟล์ `*.lock` ไปด้วย — CI (`lock-fresh`) จะ fail ถ้าลืม สคริปต์คงเวอร์ชันเดิมใน lock ไว้ (แพ็กเกจออกเวอร์ชันใหม่ไม่ทำให้ CI แดง) ถ้าจะอัปเดตทุกตัวเป็นเวอร์ชันล่าสุดให้ใช้ `python scripts/lock_requirements.py --upgrade`
 
 ไฟล์ผลลัพธ์จะอยู่ที่ `dist/ClaudeQuotaTray.exe` (~30 MB) พร้อมไอคอนจาก `assets/app.ico`
 
@@ -222,6 +224,7 @@ claude-quota-tray/
 │   └── SIGNING.md          ← การเซ็นอัปเดต (บังคับ) + การ sign .exe (OV/EV, optional) + แนวทาง macOS
 ├── requirements.txt
 ├── requirements-dev.txt    ← PyInstaller ฯลฯ สำหรับ build
+├── requirements*.lock      ← เวอร์ชัน + SHA-256 ที่ล็อกไว้ (สร้างด้วย scripts/lock_requirements.py; ติดตั้งด้วย --require-hashes)
 ├── build.bat / build.sh    ← PyInstaller build scripts (--icon assets/app.ico)
 └── .github/workflows/
     ├── ci.yml              ← unit tests + --self-test บน Windows/macOS ทุกครั้งที่ push
