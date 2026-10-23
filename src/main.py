@@ -1209,7 +1209,8 @@ def _restart_app(icon) -> None:
             args = [sys.executable] + sys.argv
         if _RESTART_FLAG not in args:
             args.append(_RESTART_FLAG)
-        kwargs: dict = {"close_fds": True, **app_platform.detached_popen_kwargs()}
+        kwargs: dict = {"close_fds": True, "env": app_paths.new_instance_env(),
+                        **app_platform.detached_popen_kwargs()}
         subprocess.Popen(args, **kwargs)
     except Exception:
         _log_action_error("restart_spawn")

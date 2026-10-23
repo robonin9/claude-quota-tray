@@ -32,6 +32,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
+import app_paths
 import config
 import settings as user_settings
 
@@ -516,7 +517,10 @@ def swap_script(staging_name: str, dest_name: str, log_path: Path, *,
         ":swapped",
     ]
     if launch:
-        lines.append(f'start "" "{exe}"')
+        lines += [
+            f'set "{app_paths.PYI_RESET_ENV}=1"',
+            f'start "" "{exe}"',
+        ]
     lines += [
         # cmd re-reads the script after every command; "(goto)" ends the
         # batch context first so deleting the file doesn't make it complain.
