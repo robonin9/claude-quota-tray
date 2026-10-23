@@ -29,9 +29,6 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
-    # macOS windows still run Tk off pystray's main thread (known limitation);
-    # report the result without blocking merges until the macOS follow-up.
-    continue-on-error: ${{ matrix.os == 'macos-latest' }}
     timeout-minutes: 15
     env:
       CQT_DATA_DIR: ${{ github.workspace }}/.ci-data

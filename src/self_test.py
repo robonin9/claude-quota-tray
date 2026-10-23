@@ -180,10 +180,8 @@ def _tray(app, ui_host, box) -> str:
     ready = threading.Event()
 
     def make():
-        icon = app.TrayIcon(
-            "claude-quota-selftest", icon=render_icon(42), title="self-test",
-            menu=app.build_menu(),
-        )
+        icon = app._make_tray_icon()  # the same icon + menu the app builds
+        icon.icon = render_icon(42)
         icon.run_detached(setup=lambda _icon: ready.set())
         return icon
 
