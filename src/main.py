@@ -41,6 +41,8 @@ import settings_dialogs
 import desktop_widget
 import ui_host
 from tray_icon import TrayIcon
+
+_IS_MAC = sys.platform == "darwin"
 from i18n import LANGUAGES, set_language, t
 from bar_widget import color_emoji, refresh_color_constants, unicode_bar
 from api_client import fetch_usage, format_reset, UsageSnapshot
@@ -375,7 +377,14 @@ def _apply_tray_update(icon: pystray.Icon, *, update_menu: bool = False) -> None
     from menu callbacks (pystray thread) or when update_menu=True. The native
     menu is also rebuilt on every right-click (tray_icon.TrayIcon), so other
     threads never need update_menu=True.
+
+    On macOS every AppKit call must happen on the main thread (Tk's), so calls
+    from other threads are re-queued there. macOS has no rebuild-on-open hook,
+    so those queued updates always rebuild the menu too.
     """
+    if _IS_MAC and not ui_host.is_ui_thread():
+        ui_host.call(_apply_tray_update, icon, update_menu=True)
+        return
     refresh_color_constants()
     try:
         icon.icon = render_icon(state.headline_pct, error=state.is_error,
@@ -752,12 +761,34 @@ def _maybe_notify_update(icon: pystray.Icon) -> None:
     threading.Thread(target=work, daemon=True).start()
 
 
+def _stop_tray(icon) -> None:
+    """Remove the tray icon and end the UI loop (the app then exits)."""
+    if _IS_MAC:
+        # icon.stop() would stop the NSApplication that Tk itself runs on.
+        # Hide the status item instead; ending run_forever() ends main().
+        def _hide():
+            try:
+                icon.visible = False
+            except Exception:
+                pass
+        try:
+            ui_host.call_sync(_hide, timeout=2)
+        except Exception:
+            pass
+        ui_host.shutdown()
+        return
+    ui_host.shutdown()
+    try:
+        icon.stop()
+    except Exception:
+        pass
+
+
 def action_quit(icon, item):
     desktop_widget.hide()
-    ui_host.shutdown()
     state.stop.set()
     state.force_refresh.set()
-    icon.stop()
+    _stop_tray(icon)
 
 
 def action_restart(icon, item):
@@ -1187,13 +1218,9 @@ def _restart_app(icon) -> None:
     # Brief delay so the replacement instance has time to come up before
     # we remove our tray icon — avoids a visible gap.
     time.sleep(0.6)
-    ui_host.shutdown()
     state.stop.set()
     state.force_refresh.set()
-    try:
-        icon.stop()
-    except Exception:
-        pass
+    _stop_tray(icon)
 
 
 def _make_set_language(code: str):
@@ -1643,6 +1670,30 @@ def _redirect_stderr_to_log() -> None:
         pass
 
 
+def _make_tray_icon():
+    return TrayIcon(
+        config.APP_ID,
+        icon=render_icon(None, theme=_current_theme(), style=_current_icon_style()),
+        title=f"{config.APP_NAME}\nStarting…",
+        menu=build_menu(),
+    )
+
+
+def _run_mac() -> None:
+    """macOS: Tk owns the main thread and the status-bar icon shares Tk's
+    NSApplication (pystray's run_detached), so both run on one event loop.
+    Returns when Quit / Restart ends the UI loop."""
+    def on_ready():
+        app_platform.hide_dock_icon()
+        icon = _make_tray_icon()
+        # pystray calls setup on its own thread; _start_poller touches AppKit.
+        icon.run_detached(setup=lambda ic: ui_host.call(_start_poller, ic))
+
+    ui_host.run_forever(on_ready=on_ready)
+    state.stop.set()
+    state.force_refresh.set()
+
+
 def main():
     if "--self-test" in sys.argv:
         # First thing: self_test points CQT_DATA_DIR at a temp folder before
@@ -1670,18 +1721,14 @@ def main():
     try:
         user_settings.load()
         notifications.init(config.APP_NAME)
+        if _IS_MAC:
+            _run_mac()
+            return
         if not ui_host.start():
             sys.stderr.write("=== Tk unavailable; windows will not open ===\n")
 
         while not state.stop.is_set():
-            icon = TrayIcon(
-                config.APP_ID,
-                icon=render_icon(None, theme=_current_theme(),
-                                 style=_current_icon_style()),
-                title=f"{config.APP_NAME}\nStarting…",
-                menu=build_menu(),
-            )
-
+            icon = _make_tray_icon()
             icon.run(setup=_start_poller)
 
             if state.stop.is_set():

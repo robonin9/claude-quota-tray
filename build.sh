@@ -40,6 +40,13 @@ pyinstaller \
     --collect-submodules Crypto \
     src/main.py
 
+# Menu-bar-only app: no Dock icon (also set at runtime, see hide_dock_icon()).
+PLIST="dist/${APP_NAME}.app/Contents/Info.plist"
+if [ -f "$PLIST" ]; then
+    /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "$PLIST" 2>/dev/null \
+        || /usr/libexec/PlistBuddy -c "Set :LSUIElement true" "$PLIST"
+fi
+
 if [ -f "dist/${APP_NAME}" ] || [ -d "dist/${APP_NAME}.app" ]; then
     echo
     echo "=== BUILD OK ==="

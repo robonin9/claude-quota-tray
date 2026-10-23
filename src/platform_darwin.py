@@ -88,3 +88,19 @@ def venv_python(project_root: Path) -> Optional[Path]:
 
 def detached_popen_kwargs() -> dict:
     return {}
+
+
+def hide_dock_icon() -> None:
+    """Run as a menu-bar-only app: no Dock icon, no app menu.
+
+    Must run on the main thread after Tk has created the NSApplication. The
+    bundled .app also sets LSUIElement (build.sh); this covers running from
+    source, where Python would otherwise show a rocket in the Dock.
+    """
+    try:
+        import AppKit
+        AppKit.NSApplication.sharedApplication().setActivationPolicy_(
+            AppKit.NSApplicationActivationPolicyAccessory
+        )
+    except Exception:
+        pass
