@@ -151,13 +151,16 @@ class SignedUpdateTests(unittest.TestCase):
 
     def test_tampered_source_zip_is_refused_and_nothing_changes(self):
         self.tamper("claude-quota-tray-v0.4.0.zip", _zip_source("0.4.0", "evil"))
-        with self.assertRaises(updater.UpdateVerificationError):
+        # The message names the release asset, not the temp download file.
+        with self.assertRaisesRegex(updater.UpdateVerificationError,
+                                    r"^claude-quota-tray-v0\.4\.0\.zip does not match"):
             self.apply()
         self.assertEqual(self.installed(), "# old\n")
 
     def test_tampered_exe_is_refused_and_staging_removed(self):
         self.tamper("ClaudeQuotaTray.exe", b"MZ evil")
-        with self.assertRaises(updater.UpdateVerificationError):
+        with self.assertRaisesRegex(updater.UpdateVerificationError,
+                                    r"^ClaudeQuotaTray\.exe does not match"):
             self.apply(prefer_exe=True)
         self.assertFalse((self.project / "ClaudeQuotaTray.exe.new").exists())
         self.assertFalse((self.project / "ClaudeQuotaTray.exe").exists())

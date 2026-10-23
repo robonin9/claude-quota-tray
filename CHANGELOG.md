@@ -9,6 +9,12 @@ All notable changes to this fork are documented here.
 
 ## [Unreleased]
 
+### Fixed / maintenance
+
+- **Update errors name the real file.** A refused download now says e.g. `claude-quota-tray-v0.5.0.zip does not match its signed SHA-256` instead of the temp name `release.zip` / `ClaudeQuotaTray.exe.new`.
+- **GitHub Actions on Node.js 24.** `actions/checkout@v7`, `setup-python@v7`, `upload-artifact@v7`, `download-artifact@v8` (now fails on artifact hash mismatch by default) and `softprops/action-gh-release@v3`; the Node.js 20 deprecation warnings are gone.
+- **CI results readable without a GitHub login.** Unit-test and `--self-test` output is published as annotations (`scripts/ci_annotate.py`): failures as errors, the self-test report as a notice. The self-test now runs even if unit tests fail, and its logs are uploaded with the artifacts.
+
 ## [0.5.0] — 2026-10-23 — fork (robonin9)
 
 The fork's version skips 0.4.0: upstream already published a different v0.4.0, and the two must not be confused.
