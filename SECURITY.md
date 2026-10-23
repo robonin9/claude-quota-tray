@@ -94,6 +94,13 @@ will never move to an older one).
   signature. Remaining gaps: the first update *from 0.5.0* still runs 0.5.0's
   updater, which installs from `requirements.txt` without hashes (later updates
   use the lock), and `pip` itself is whatever the local Python bundles.
+- **The `.exe` swap from 0.5.0 can fail without saying so.** The file is only
+  swapped after the app quits, by a script the *running* version writes.
+  0.5.0's script waits a fixed 3 seconds; if the old `.exe` is still locked it
+  restarts 0.5.0 and leaves the verified `ClaudeQuotaTray.exe.new` behind (quit
+  the app and `move /y ClaudeQuotaTray.exe.new ClaudeQuotaTray.exe`). From 0.6.0
+  the script retries for 30 seconds and logs a failure to `error.log`. Either
+  way nothing unverified is run: the `.new` file passed every check above.
 - **Manual updates are not verified automatically.** If you replace files by
   hand, compare them against the release's `SHA256SUMS` yourself (for example
   `certutil -hashfile <file> SHA256` on Windows).

@@ -23,6 +23,11 @@ All notable changes to this fork are documented here.
 - The release source zip now includes `requirements.lock`; it's covered by the signed `SHA256SUMS`, so an update's dependency hashes are as trusted as its code. The very first update from 0.5.0 still installs from `requirements.txt` (it runs 0.5.0's updater).
 - CI job `lock-fresh` fails if `requirements*.txt` changed without regenerating the locks. Existing pins are kept, so a new upstream release doesn't break CI; `python scripts/lock_requirements.py --upgrade` moves them to the latest versions.
 
+### Fixed: `.exe` updates no longer race the exiting app
+
+- **The `.exe` swap waits for the old file to be free.** `Apply Claude Quota Tray update.bat` used to sleep 3 seconds, try `move` once and start the app regardless. A onefile `.exe` stays locked while its bootloader cleans up (and antivirus may scan the new file), so a slow exit silently restarted the *old* version and left `ClaudeQuotaTray.exe.new` behind. It now retries `move` every second for up to 30 seconds, starts the app only if the swap worked, and otherwise keeps the verified `.new` file and the script (run it again to retry), writes the failure to `error.log` and shows a message.
+- **Upgrading from 0.5.0 still uses 0.5.0's script** (the running version writes it). If `ClaudeQuotaTray.exe.new` is still next to the `.exe` after the app restarts, quit the tray app, run `move /y ClaudeQuotaTray.exe.new ClaudeQuotaTray.exe` in that folder, then start it again. The `.new` file is already verified against the signed `SHA256SUMS`. Updates from 0.6.0 onward use the new script.
+
 ### Fixed / maintenance
 
 - **Update errors name the real file.** A refused download now says e.g. `claude-quota-tray-v0.5.0.zip does not match its signed SHA-256` instead of the temp name `release.zip` / `ClaudeQuotaTray.exe.new`.
