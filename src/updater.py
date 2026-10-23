@@ -33,6 +33,7 @@ from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 import config
+import settings as user_settings
 
 _GITHUB_API = "https://api.github.com/repos/{owner}/{repo}/releases/latest"
 _REPO_RE = re.compile(
@@ -458,6 +459,85 @@ def pip_install_command(python: Path, project_dir: Path) -> Optional[list[str]]:
     return None
 
 
+SWAP_SCRIPT_NAME = "Apply Claude Quota Tray update.bat"
+SWAP_TIMEOUT_SECONDS = 30
+
+
+SWAP_FALLBACK_LOG = "Claude Quota Tray update error.log"
+
+
+def _bat_quote(text: str) -> str:
+    return str(text).replace("%", "%%")
+
+
+def _bat_log_path(log_path: Path) -> str:
+    """``log_path`` spelled with ASCII only.
+
+    cmd.exe decodes a batch file with the console code page, so a non-ASCII
+    user name would garble a literal path (and ``chcp 65001`` breaks cmd's
+    lookup of the batch file itself in a non-ASCII folder). Variables are
+    expanded as Unicode, so the profile folder goes through %USERPROFILE%.
+    """
+    text = str(log_path)
+    home = os.environ.get("USERPROFILE", "").rstrip("\\/")
+    prefix = ""
+    if home and text.lower().startswith(home.lower() + "\\"):
+        prefix, text = "%USERPROFILE%", text[len(home):]
+    if not text.isascii():
+        return f"%~dp0{_bat_quote(SWAP_FALLBACK_LOG)}"
+    return prefix + _bat_quote(text)
+
+
+def swap_script(staging_name: str, dest_name: str, log_path: Path, *,
+                tries: int = SWAP_TIMEOUT_SECONDS, launch: bool = True,
+                pause: bool = True) -> str:
+    """Batch file that replaces the running .exe once the app has exited.
+
+    A onefile .exe stays locked while its bootloader cleans up its temp
+    folder (and antivirus may scan the new file), so ``move`` is retried once
+    a second for up to ``tries`` seconds. The new version is started only if
+    the swap worked; otherwise the verified ``.new`` file and this script are
+    kept (run it again to retry) and the failure is logged.
+    """
+    new, exe = _bat_quote(staging_name), _bat_quote(dest_name)
+    log = _bat_log_path(log_path)
+    lines = [
+        "@echo off",
+        "setlocal",
+        'cd /d "%~dp0"',
+        "set /a TRIES=0",
+        ":retry",
+        f'move /y "{new}" "{exe}" >nul 2>&1',
+        "if not errorlevel 1 goto swapped",
+        "set /a TRIES+=1",
+        f"if %TRIES% GEQ {int(tries)} goto failed",
+        "ping -n 2 127.0.0.1 >nul",
+        "goto retry",
+        ":swapped",
+    ]
+    if launch:
+        lines.append(f'start "" "{exe}"')
+    lines += [
+        # cmd re-reads the script after every command; "(goto)" ends the
+        # batch context first so deleting the file doesn't make it complain.
+        '(goto) 2>nul & del "%~f0"',
+        ":failed",
+        f'>>"{log}" echo [%date% %time%] update: could not replace {exe} after '
+        f'{int(tries)}s; the verified new version is kept as {new}. '
+        f'Run "{_bat_quote(SWAP_SCRIPT_NAME)}" again to retry.',
+        f"echo Could not replace {exe} - it is still in use.",
+        f"echo The verified update is saved as {new}.",
+        "echo Close Claude Quota Tray, then run this file again.",
+    ]
+    if pause:
+        lines.append("timeout /t 60")
+    lines.append("exit /b 1")
+    text = "\r\n".join(lines) + "\r\n"
+    if not text.isascii():
+        raise ValueError("swap script must be ASCII")
+    return text
+
+
 def apply_exe_update(project_dir: Path, release: ReleaseInfo,
                      entries: dict[str, str]) -> str:
     if not release.exe_url or not release.exe_name:
@@ -475,16 +555,10 @@ def apply_exe_update(project_dir: Path, release: ReleaseInfo,
         raise
     running = Path(sys.executable).resolve()
     if dest.exists() and running == dest.resolve():
-        bat = project_dir / "Apply Claude Quota Tray update.bat"
-        bat.write_text(
-            "@echo off\n"
-            'cd /d "%~dp0"\n'
-            "timeout /t 3 /nobreak >nul\n"
-            f'move /y "{staging.name}" "{dest.name}"\n'
-            f'start "" "{dest.name}"\n'
-            'del "%~f0"\n',
-            encoding="utf-8",
-        )
+        bat = project_dir / SWAP_SCRIPT_NAME
+        bat.write_bytes(swap_script(
+            staging.name, dest.name, user_settings.error_log_path(),
+        ).encode("utf-8"))
         if sys.platform == "win32":
             os.startfile(bat)  # type: ignore[attr-defined]
         return "Update will apply after you quit the app."

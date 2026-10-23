@@ -9,6 +9,10 @@ All notable changes to this fork are documented here.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-23 — fork (robonin9)
+
+Signed with the same key as 0.5.0, so the in-app update from 0.5.0 installs it (`.exe` users: see *Upgrading from 0.5.0 still uses 0.5.0's script* below). macOS support is still beta.
+
 ### macOS: Tk owns the main thread
 
 - **Windows open on macOS.** Tk and AppKit both require the main thread, which pystray used to own, so any window on a Mac could abort the app. Now `ui_host.run_forever(on_ready=...)` runs Tk on the main thread, and the menu-bar icon is created in `on_ready` with pystray's `run_detached()` — it shares Tk's `NSApplication`, so one event loop drives both. Tray updates from the poll thread are re-queued to the main thread (rebuilding the menu, since macOS has no rebuild-on-open hook). On macOS `ui_host.call()` never starts a background Tk thread.
@@ -22,6 +26,11 @@ All notable changes to this fork are documented here.
 - Setup and `setup_mac.sh` no longer self-upgrade pip (that download wasn't hash-checked; the bundled pip supports `--require-hashes`).
 - The release source zip now includes `requirements.lock`; it's covered by the signed `SHA256SUMS`, so an update's dependency hashes are as trusted as its code. The very first update from 0.5.0 still installs from `requirements.txt` (it runs 0.5.0's updater).
 - CI job `lock-fresh` fails if `requirements*.txt` changed without regenerating the locks. Existing pins are kept, so a new upstream release doesn't break CI; `python scripts/lock_requirements.py --upgrade` moves them to the latest versions.
+
+### Fixed: `.exe` updates no longer race the exiting app
+
+- **The `.exe` swap waits for the old file to be free.** `Apply Claude Quota Tray update.bat` used to sleep 3 seconds, try `move` once and start the app regardless. A onefile `.exe` stays locked while its bootloader cleans up (and antivirus may scan the new file), so a slow exit silently restarted the *old* version and left `ClaudeQuotaTray.exe.new` behind. It now retries `move` every second for up to 30 seconds, starts the app only if the swap worked, and otherwise keeps the verified `.new` file and the script (run it again to retry), writes the failure to `error.log` and shows a message.
+- **Upgrading from 0.5.0 still uses 0.5.0's script** (the running version writes it). If `ClaudeQuotaTray.exe.new` is still next to the `.exe` after the app restarts, quit the tray app, run `move /y ClaudeQuotaTray.exe.new ClaudeQuotaTray.exe` in that folder, then start it again. The `.new` file is already verified against the signed `SHA256SUMS`. Updates from 0.6.0 onward use the new script.
 
 ### Fixed / maintenance
 
