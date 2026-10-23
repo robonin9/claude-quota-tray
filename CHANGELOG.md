@@ -9,6 +9,13 @@ All notable changes to this fork are documented here.
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-10-23 — fork (robonin9)
+
+### Fixed: the `.exe` restarts after an update or *Restart*
+
+- **"Failed to load Python DLL …\_MEIxxxx\python312.dll" after an in-app update.** The swap worked, but the new `.exe` was started from a process that inherited the old instance's PyInstaller variables (`_PYI_*`), so its bootloader treated it as the old instance's child and looked for Python in the old, already deleted temp folder. The update script now sets `PYINSTALLER_RESET_ENVIRONMENT=1` before starting the app, and *Restart* (e.g. after changing the language) starts the new instance the same way (`app_paths.new_instance_env()`).
+- **Updating from 0.5.0 or 0.6.0** still runs that version's script: if the error appears, click OK and start Claude Quota Tray again — the new version is already in place.
+
 ## [0.6.0] — 2026-10-23 — fork (robonin9)
 
 Signed with the same key as 0.5.0, so the in-app update from 0.5.0 installs it (`.exe` users: see *Upgrading from 0.5.0 still uses 0.5.0's script* below). macOS support is still beta.

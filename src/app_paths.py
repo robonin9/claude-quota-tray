@@ -14,6 +14,18 @@ def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
+# A onefile .exe passes _PYI_* variables to its children. A new instance that
+# inherits them thinks it is the old instance's child and loads python3xx.dll
+# from the old, deleted _MEI folder ("Failed to load Python DLL"). This tells
+# the bootloader to ignore them (PyInstaller >= 6.9).
+PYI_RESET_ENV = "PYINSTALLER_RESET_ENVIRONMENT"
+
+
+def new_instance_env() -> dict[str, str]:
+    """Environment for starting a separate copy of this app."""
+    return {**os.environ, PYI_RESET_ENV: "1"}
+
+
 def project_root() -> Path:
     """Directory containing src/ or the .exe (install root)."""
     if is_frozen():

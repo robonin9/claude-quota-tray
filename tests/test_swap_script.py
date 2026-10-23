@@ -1,6 +1,7 @@
 """The batch file that swaps in a downloaded .exe after the app quits."""
 
 import hashlib
+import os
 import subprocess
 import sys
 import tempfile
@@ -37,6 +38,11 @@ class SwapScriptTextTests(unittest.TestCase):
         start = self.text.index(f'start "" "{EXE}"')
         self.assertTrue(swapped < start < failed)
         self.assertEqual(self.text.count("start "), 1)
+
+    def test_new_instance_ignores_inherited_pyinstaller_state(self):
+        reset = self.text.index(f'set "{updater.app_paths.PYI_RESET_ENV}=1"')
+        self.assertTrue(self.text.index(":swapped") < reset
+                        < self.text.index(f'start "" "{EXE}"'))
 
     def test_failure_keeps_script_and_logs(self):
         failure = self.text[self.text.index(":failed"):]
@@ -112,6 +118,27 @@ class SwapScriptRunTests(unittest.TestCase):
         log = self.log.read_text(encoding="utf-8")
         self.assertIn(f"could not replace {EXE}", log)
         self.assertIn(NEW, log)
+
+    def test_started_app_gets_reset_flag(self):
+        probe = "probe.cmd"
+        out = self.dir / "env.txt"
+        (self.dir / probe).write_bytes(b"old")
+        (self.dir / (probe + ".new")).write_bytes(
+            f'@>"%~dp0env.txt" echo [%{updater.app_paths.PYI_RESET_ENV}%]\r\n@exit\r\n'
+            .encode("ascii"))
+        bat = self.dir / updater.SWAP_SCRIPT_NAME
+        bat.write_bytes(updater.swap_script(
+            probe + ".new", probe, self.log, tries=3, pause=False).encode("utf-8"))
+        env = {**os.environ, "_PYI_APPLICATION_HOME_DIR": r"C:\gone\_MEI1"}
+        env.pop(updater.app_paths.PYI_RESET_ENV, None)
+        proc = subprocess.run(["cmd", "/c", str(bat)], capture_output=True,
+                              stdin=subprocess.DEVNULL, env=env, timeout=60)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        for _ in range(100):
+            if out.exists() and out.read_text().strip():
+                break
+            time.sleep(0.1)
+        self.assertEqual(out.read_text().strip(), "[1]")
 
     def test_non_ascii_log_path_lands_next_to_exe(self):
         self.log = self.dir / "บันทึก" / "error.log"
